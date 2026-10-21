@@ -1,0 +1,29 @@
+name = "relay-min"
+main = "src/index.js"
+compatibility_date = "2026-10-19"
+workers_dev = true
+
+# 自定义域请在 Cloudflare Dashboard 绑定：
+# Worker -> Settings -> Domains & Routes -> Add -> Custom domain
+# 不要在这里写 routes；不同 Cloudflare 账号的域名无法共用本文件的配置。
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html", "**/*.txt"]
+fallthrough = true
+
+[[rules]]
+type = "Data"
+globs = ["**/*.woff2", "**/*.png"]
+fallthrough = true
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "RELAY_ROOM"
+class_name = "RelayRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayRoom"]

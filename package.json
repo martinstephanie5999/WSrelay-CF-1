@@ -1,0 +1,18 @@
+{
+  "name": "relay-min",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:single": "node scripts/build-single.mjs",
+    "test": "node --test test/unit/protocol.test.mjs",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --port 8787 --local"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.1"
+  }
+}

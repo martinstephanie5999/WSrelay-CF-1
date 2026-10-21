@@ -1,0 +1,15 @@
+name = "relay-min-single"
+main = "worker.js"
+compatibility_date = "2026-10-19"
+workers_dev = true
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "RELAY_ROOM"
+class_name = "RelayRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayRoom"]

@@ -1,0 +1,3368 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>relay · 一对一双向传输</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/favicon-180.png">
+<script>
+  (function () {
+    try {
+      var saved = localStorage.getItem("relay.theme");
+      var theme = saved === "light" || saved === "dark"
+        ? saved
+        : (window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      document.documentElement.dataset.theme = theme;
+    } catch (e) {
+      document.documentElement.dataset.theme = "dark";
+    }
+  })();
+</script>
+<style>
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+  }
+  :root {
+    color-scheme: dark;
+    --bg: #0e1116;
+    --surface: #161b22;
+    --surface-2: #10151b;
+    --border: #232a33;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --disabled: #484f58;
+    --accent: #3dffb0;
+    --accent-ink: #08130d;
+    --accent-glow: rgba(61, 255, 176, .55);
+    --accent-soft: rgba(61, 255, 176, .08);
+    --accent-line: rgba(61, 255, 176, .4);
+    --warn: #ffb224;
+    --danger: #ff6b6b;
+    --radius-card: 12px;
+    --radius-control: 8px;
+    --shadow: 0 4px 16px rgba(0, 0, 0, .4);
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+  }
+  html[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f4f6f9;
+    --surface: #ffffff;
+    --surface-2: #eef2f6;
+    --border: #d8dfe7;
+    --text: #111821;
+    --muted: #5c6876;
+    --disabled: #a8b2bd;
+    --accent: #0b9e6e;
+    --accent-ink: #ffffff;
+    --accent-glow: rgba(11, 158, 110, .35);
+    --accent-soft: rgba(11, 158, 110, .08);
+    --accent-line: rgba(11, 158, 110, .38);
+    --warn: #a86200;
+    --danger: #c0392b;
+    --shadow: 0 4px 16px rgba(16, 24, 40, .08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 "PingFang SC", "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); }
+  main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .icon-btn { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; background: transparent; border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--muted); }
+  .icon-btn:hover { color: var(--text); border-color: var(--muted); }
+  #themeBtn .moon { display: none; }
+  html[data-theme="light"] #themeBtn .sun { display: none; }
+  html[data-theme="light"] #themeBtn .moon { display: block; }
+  @media (min-width: 1024px) {
+    #joinView, #pwView { margin-left: auto; margin-right: auto; margin-top: 6vh; }
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: .02em; }
+  .brand svg { display: block; color: var(--accent); }
+  .pill { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--disabled); flex: none; }
+  .dot.ok { background: var(--accent); }
+  .dot.warn { background: var(--warn); animation: breathe 1.6s ease-in-out infinite; }
+  .dot.bad { background: var(--danger); }
+  @keyframes breathe { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 16px; margin-bottom: 16px; }
+  @media (min-width: 1024px) { .card { padding: 24px; } }
+  h2 { font-size: 13px; font-weight: 600; margin: 0 0 12px; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .card-head h2 { margin: 0; }
+  .card-head .ghost { flex: none; min-height: 32px; padding: 4px 10px; font-size: 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  input[type=text], input[type=file], input[type=password], button {
+    font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius-control); padding: 10px 12px; min-height: 40px;
+  }
+  input[type=text], input[type=password] { width: 100%; }
+  input[type=file] { padding: 6px 8px; min-height: 40px; width: 100%; }
+  input[type=file]::file-selector-button {
+    font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 12px; margin-right: 10px; cursor: pointer;
+  }
+  input[type=file]::file-selector-button:hover { border-color: var(--muted); }
+  input:focus, button:focus-visible { outline: none; border-color: var(--accent); }
+  button { cursor: pointer; transition: border-color .2s ease, background .2s ease, filter .2s ease; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.05); border-color: var(--accent); }
+  button.ghost { background: transparent; }
+  button.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+  .hint.bad { color: var(--danger); }
+  .hidden { display: none !important; }
+
+  .join { max-width: 560px; }
+  .room-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .room-code { font-size: 13px; color: var(--muted); word-break: break-all; }
+  .channel { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; margin: 28px 0 6px; }
+  .ep { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .node { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--disabled); display: grid; place-items: center; transition: border-color .3s ease, box-shadow .3s ease; }
+  .node i { width: 5px; height: 5px; border-radius: 50%; background: transparent; transition: background .3s ease; }
+  .ep-label { font-size: 12px; color: var(--muted); }
+  .track { position: relative; height: 2px; background: var(--border); border-radius: 1px; }
+  .ticks { position: absolute; inset: 0; background-image: repeating-linear-gradient(90deg, var(--border) 0 1px, transparent 1px 16px); opacity: .5; }
+  .dot { position: absolute; top: 50%; left: 0; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent-glow); opacity: 0; }
+  #channel.ready .node, #channel.flow .node { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+  #channel.ready .node i, #channel.flow .node i { background: var(--accent); }
+  #channel.flow .track { background: var(--accent); }
+  #channel.flow .ticks { opacity: .35; }
+  #channel.flow .dot { opacity: 1; animation: run var(--flow-dur, 1.2s) linear infinite; }
+  #channel.warn .track { background: var(--warn); }
+  #channel.warn .node { border-color: var(--warn); animation: breathe 1.6s ease-in-out infinite; }
+  #channel.warn .node i { background: var(--warn); }
+  #channel.done .node { border-color: var(--disabled); }
+  #channel.done .track { background: var(--border); }
+  #channel.done .dot { animation: drain .7s ease-out forwards; }
+  #channel.bad .node { border-color: var(--danger); }
+  @keyframes run { from { left: 0; } to { left: 100%; } }
+  @keyframes drain { 0% { opacity: 1; left: 40%; } 100% { opacity: 0; left: 100%; } }
+
+  .status-line { display: flex; align-items: center; gap: 8px; min-height: 20px; margin: 8px 2px 16px; font-size: 13px; color: var(--muted); }
+  .status-line.ok { color: var(--text); }
+  .status-line.warn { color: var(--warn); }
+  .status-line.bad { color: var(--danger); }
+
+  .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  @media (min-width: 1024px) { .grid { grid-template-columns: 1fr 1fr; } }
+
+  .item { border: 1px solid var(--border); border-radius: var(--radius-control); padding: 12px; margin-bottom: 8px; background: var(--surface-2); }
+  .item .top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .meta { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); margin-top: 8px; align-items: center; flex-wrap: nowrap; }
+  .item .detail { font-family: var(--mono); font-size: 12px; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .btn-pause { min-height: 28px; padding: 4px 12px; font-size: 12px; flex: none; white-space: nowrap; }
+  @media (max-width: 640px) {
+    .item .detail { white-space: normal; }
+  }
+  .bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 10px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s linear; }
+  .bar.warn > i { background: var(--warn); }
+  .bar.bad > i { background: var(--danger); }
+  .bar.flow > i { background-image: linear-gradient(90deg, rgba(8, 19, 13, .3), rgba(8, 19, 13, 0) 45%, rgba(8, 19, 13, .3)); background-size: 200% 100%; animation: sheen 1.1s linear infinite; }
+  @keyframes sheen { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  .hash { word-break: break-all; font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .share { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .ticket { display: grid; grid-template-columns: 1fr auto; gap: 24px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 16px; }
+  @media (max-width: 640px) { .ticket { grid-template-columns: 1fr; } }
+  .ticket-label { font-size: 12px; color: var(--muted); letter-spacing: .08em; }
+  .room-big { font-size: 28px; letter-spacing: .04em; word-break: break-all; margin: 4px 0 16px; }
+  .badge { font-size: 12px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; }
+  .badge.on { color: var(--accent); border-color: var(--accent-line); }
+  .ticket-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .qr-frame { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+  .qr-frame canvas { display: block; width: 176px; height: 176px; }
+
+  .dropzone { border: 1px dashed var(--border); border-radius: var(--radius-card); padding: 24px 16px; text-align: center; transition: border-color .2s ease, background .2s ease; }
+  .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); }
+  .dz-mark { color: var(--muted); margin-bottom: 8px; }
+  .dz-title { margin: 0; font-weight: 500; }
+  .dz-sub { margin: 4px 0 16px; font-size: 12px; color: var(--muted); }
+  .recv-item .file-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .recv-item .name { font-family: var(--mono); font-size: 13px; }
+  .recv-item .size { color: var(--muted); font-size: 12px; }
+  .pending { margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2); overflow: hidden; }
+  .pending-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+  .pending-head #clearPendingBtn { min-height: 28px; padding: 2px 10px; font-size: 12px; }
+  #pendingList { max-height: 220px; overflow: auto; }
+  .pending-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .pending-row:last-child { border-bottom: 0; }
+  .pending-row .p-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 13px; }
+  .pending-row .p-size { flex: none; color: var(--muted); font-size: 12px; }
+  .pending-row .p-remove { flex: none; min-height: 28px; padding: 2px 10px; font-size: 12px; }
+  .diag summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  #log { margin-top: 12px; max-height: 200px; overflow: auto; white-space: pre-wrap; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+        <circle cx="3.5" cy="9" r="1.8"/><circle cx="14.5" cy="9" r="1.8"/><path d="M6 9h6"/>
+      </svg>
+      relay
+    </div>
+    <div class="header-right">
+      <button class="icon-btn" id="themeBtn" aria-label="切换明暗主题" title="切换明暗主题">
+        <svg class="sun" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+          <circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M13 3l-1.4 1.4M4.4 11.6L3 13"/>
+        </svg>
+        <svg class="moon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+          <path d="M13.5 9.5A6 6 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7z"/>
+        </svg>
+      </button>
+      <span class="pill"><i class="dot" id="connDot"></i><span id="connText">未连接</span></span>
+    </div>
+  </header>
+
+  <section id="joinView" class="card join">
+    <h2>建立临时通道</h2>
+    <div class="field">
+      <label for="roomInput">房间码或链接</label>
+      <input type="text" id="roomInput" placeholder="粘贴链接，或输入房间码" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="passwordInput">房间密码（可选：创建时设置，加入时填写）</label>
+      <input type="password" id="passwordInput" autocomplete="off">
+    </div>
+    <div class="row">
+      <button class="primary" id="joinBtn">加入</button>
+      <button class="ghost" id="createBtn">创建新房间</button>
+    </div>
+    <p class="hint" id="joinHint">房间只保存连接信息，不保存文件；文件只写入接收端本机。</p>
+  </section>
+
+  <section id="pwView" class="card join hidden">
+    <h2>该房间需要密码</h2>
+    <div class="field">
+      <label for="pwInput">密码</label>
+      <input type="password" id="pwInput" autocomplete="off">
+    </div>
+    <div class="row"><button class="primary" id="pwBtn">进入房间</button></div>
+    <p class="hint" id="pwHint">密码只在本机计算哈希后用于校验，不写入链接。</p>
+  </section>
+
+  <section id="appView" class="hidden">
+    <div class="card">
+      <div class="room-top">
+        <div>
+          <div class="room-code mono" id="roomLabel"></div>
+          <div class="pill" style="margin-top:8px"><i class="dot" id="peerDot"></i><span id="peerText">等待对端</span></div>
+        </div>
+        <button class="ghost" id="shareBtn">分享</button>
+      </div>
+      <div class="channel" id="channel">
+        <div class="ep"><span class="node"><i></i></span><span class="ep-label">你</span></div>
+        <div class="track"><span class="ticks"></span><span class="dot"></span></div>
+        <div class="ep"><span class="node"><i></i></span><span class="ep-label">对端</span></div>
+      </div>
+      <div class="share hidden" id="shareBox">
+        <div class="ticket">
+          <div class="ticket-main">
+            <div class="ticket-label">房间码</div>
+            <div class="room-big mono" id="shareCode"></div>
+            <div class="field">
+              <label for="shareLink">链接</label>
+              <input type="text" id="shareLink" readonly class="mono">
+            </div>
+            <div class="row">
+              <button class="ghost" id="copyBtn">复制链接</button>
+              <span class="badge" id="pwBadge">公开房间</span>
+              <span class="hint" id="copyHint" style="margin:0"></span>
+            </div>
+          </div>
+          <div class="ticket-qr">
+            <div class="qr-frame"><canvas id="qrCanvas" width="200" height="200"></canvas></div>
+            <p class="hint" style="text-align:center;margin:0">扫码打开链接<br>密码单独输入</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="status-line" id="statusLine"><i class="dot" id="statusDot"></i><span id="statusText"></span></div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-head">
+          <h2>发送</h2>
+          <button class="ghost" id="clearOutgoingBtn" disabled>清空已完成</button>
+        </div>
+        <div class="dropzone" id="dropZone">
+          <svg class="dz-mark" width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+            <path d="M13 4v12"/><path d="M8.5 8.5L13 4l4.5 4.5"/><path d="M4 18v3.5h18V18"/>
+          </svg>
+          <p class="dz-title">拖入文件或文件夹</p>
+          <p class="dz-sub">文件只在通道里穿流，不落盘</p>
+          <div class="row" style="justify-content:center">
+            <button class="ghost" id="pickFilesBtn">选择文件</button>
+            <button class="ghost" id="folderBtn">选择文件夹</button>
+            <button class="primary" id="sendBtn" disabled>开始发送</button>
+          </div>
+          <input type="file" id="fileInput" class="hidden" multiple>
+          <input type="file" id="folderInput" webkitdirectory multiple class="hidden">
+        </div>
+        <div class="pending hidden" id="pendingBox">
+          <div class="pending-head">
+            <span id="pendingSummary">待传输</span>
+            <button class="ghost" id="clearPendingBtn">清空</button>
+          </div>
+          <div id="pendingList"></div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <span class="hint" id="batchHint" style="margin:0"></span>
+        </div>
+        <p class="hint">大文件建议单次控制在数 GB 内；文件夹按路径排序逐个传输，每个文件独立续传。</p>
+        <div id="outgoing" style="margin-top:16px"><div class="empty">还没有发送任务。</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>接收 <span class="hint" id="recvCount" style="margin:0"></span></h2>
+          <div class="row" style="flex:none">
+            <label class="hint" style="display:flex;align-items:center;gap:6px;margin:0">
+              <input type="checkbox" id="autoAcceptToggle"> 自动接收
+            </label>
+            <button class="ghost" id="clearIncompleteBtn" disabled>清理未完成</button>
+            <button class="ghost" id="clearReceivedBtn" disabled>清空已接收</button>
+          </div>
+        </div>
+        <p class="hint" id="recvHint" style="margin-top:0">收到文件后会先显示确认，不会自动写入本机；勾选“自动接收”可跳过。</p>
+        <div id="incoming"><div class="empty">等待对端发送文件。</div></div>
+      </div>
+    </div>
+
+    <details class="card diag">
+      <summary>诊断日志</summary>
+      <pre id="log"></pre>
+    </details>
+  </section>
+</main>
+
+<script src="/qrcode.js"></script>
+<script type="module">
+import {
+  PROTOCOL_VERSION, HEADER_SIZE, MAGIC_0, MAGIC_1, FLAG_FINAL,
+  CHUNK_SIZE, WINDOW_SIZE, PERSIST_EVERY_CHUNKS,
+  MIN_CHUNK_SIZE, MAX_CHUNK_SIZE, MAX_WINDOW_SIZE,
+  CONTROL_MAX_BYTES, EARLY_DATA_MAX_BYTES,
+} from "/protocol.js";
+
+const $ = (id) => document.getElementById(id);
+const CLIENT_ID_KEY = "relay.clientId";
+const MAX_LOG_LINES = 120;
+// Adaptive window: starts at the protocol default and may grow on a clean
+// run. Never below persistEveryChunks (8), capped at 16 (4 MiB burst).
+const MIN_ADAPTIVE_WINDOW = 8;
+const MAX_ADAPTIVE_WINDOW = 16;
+
+function getClientId() {
+  try {
+    let id = localStorage.getItem(CLIENT_ID_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(CLIENT_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    // Private modes can throw on localStorage access. Keep a per-page id so
+    // the session still works (it simply will not survive a reload).
+    if (!fallbackClientId) fallbackClientId = crypto.randomUUID();
+    return fallbackClientId;
+  }
+}
+
+let fallbackClientId = null;
+const clientId = getClientId();
+
+const state = {
+  roomId: null,
+  ws: null,
+  connId: null,
+  serverNonce: null,
+  peer: { clientId: null, connId: null },
+  peerReady: false,
+  helloSentFor: null,
+  authSentFor: null,
+  lastHelloReplyFor: null,
+  transfers: new Map(),
+  stopped: false,
+  reconnectAttempt: 0,
+  reconnectTimer: null,
+  peerOfflineTimer: null,
+  messageChain: Promise.resolve(),
+  logs: [],
+  writeDelayMs: 0,
+  dropNextControl: null,
+  dropNextControlCount: 1,
+  passwordHash: null,
+  pendingRoom: null,
+  stoppedCode: null,
+  disconnectAt: 0,
+  reconnectVisible: false,
+  reconnectTimerUi: null,
+  lastAckAt: 0,
+  qrMatrix: null,
+  reconnectPaused: false,
+  batch: null,
+  pending: [],
+  autoAccept: false,
+  autoAcceptBatch: null,
+  clearingReceived: false,
+};
+
+try {
+  const autoParam = new URLSearchParams(location.search).get("auto");
+  state.autoAccept = autoParam === null
+    ? localStorage.getItem("relay.autoAccept") === "1"
+    : autoParam === "1";
+} catch {
+  state.autoAccept = false;
+}
+
+function log(line) {
+  const text = `[${new Date().toLocaleTimeString()}] ${line}`;
+  state.logs.push(text);
+  if (state.logs.length > MAX_LOG_LINES) state.logs.shift();
+  const el = $("log");
+  if (el) {
+    el.textContent = state.logs.join("\n");
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+function fmtBytes(n) {
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MiB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GiB`;
+}
+
+function fmtSpeed(bytes, ms) {
+  if (!ms || ms < 1) return "—";
+  return `${(bytes / 1024 / 1024 / (ms / 1000)).toFixed(1)} MiB/s`;
+}
+
+function fmtProgress(have, total) {
+  const MIB = 1024 * 1024;
+  if (total >= MIB && total < 1024 * MIB && have < 1024 * MIB) {
+    return `${(have / MIB).toFixed(1)} / ${(total / MIB).toFixed(1)} MiB`;
+  }
+  return `${fmtBytes(have)} / ${fmtBytes(total)}`;
+}
+
+function setConn(text, tone = "") {
+  $("connText").textContent = text;
+  $("connDot").className = "dot " + tone;
+}
+
+function setPeer(text, tone = "") {
+  $("peerText").textContent = text;
+  $("peerDot").className = "dot " + tone;
+}
+
+function applyAutoAccept(value) {
+  state.autoAccept = Boolean(value);
+  try {
+    localStorage.setItem("relay.autoAccept", state.autoAccept ? "1" : "0");
+  } catch {
+    // Storage can be unavailable; keep the in-memory value.
+  }
+  const cb = $("autoAcceptToggle");
+  if (cb) cb.checked = state.autoAccept;
+}
+
+function showPasswordPrompt(reason = "") {
+  $("joinView").classList.add("hidden");
+  $("appView").classList.add("hidden");
+  $("pwView").classList.remove("hidden");
+  $("pwHint").textContent = String(reason).includes("too_many_attempts")
+    ? "尝试次数过多，房间已临时封禁，请稍后再试。"
+    : "密码不正确，请重新输入。";
+  setConn("需要密码", "warn");
+  $("pwInput").value = "";
+  $("pwInput").focus();
+}
+
+function activeTransfers() {
+  return [...state.transfers.values()].filter((t) =>
+    ["offering", "sending", "completing", "receiving"].includes(t.state));
+}
+
+function computeUiState() {
+  const active = activeTransfers();
+  if (state.stoppedCode === 4005) {
+    return { key: "auth", text: "此房间需要密码", tone: "warn" };
+  }
+  if (state.stoppedCode === 4001) {
+    return { key: "error", text: "连接已在其他标签页接管", tone: "warn" };
+  }
+  if (state.stoppedCode) {
+    return { key: "error", text: `连接已终止（${state.stoppedCode}）`, tone: "bad" };
+  }
+  if (state.reconnectVisible) {
+    const t = active[0];
+    let progress = "";
+    if (t) {
+      const have = t.direction === "send" ? t.ackedOffset : t.receivedBytes;
+      const total = t.direction === "send" ? t.size : t.expectedSize;
+      if (total) {
+        progress = `已${t.direction === "send" ? "发送" : "接收"} ${Math.floor((have / total) * 100)}%`;
+      }
+    }
+    return {
+      key: "reconnecting",
+      text: `正在重新连接…${progress ? " " + progress + "，" : " "}将从断点继续`,
+      tone: "warn",
+    };
+  }
+  const offered = [...state.transfers.values()].find(
+    (t) => t.direction === "recv" && t.state === "offered",
+  );
+  if (offered) {
+    return {
+      key: "paused",
+      text: `收到文件，等待你确认：${offered.path || offered.name}`,
+      tone: "warn",
+    };
+  }
+  if (active.length) {
+    const pausedT = active.find((t) => t.paused || t.peerPaused);
+    if (pausedT) {
+      return {
+        key: "paused",
+        text: pausedT.paused ? "已暂停，恢复后将从断点继续" : "发送端已暂停",
+        tone: "warn",
+      };
+    }
+    const sending = active.find((t) => t.direction === "send" && t.state === "sending");
+    if (sending && sending.sentOffset > sending.ackedOffset) {
+      // A full window waiting on the next persist ACK is the normal shape of a
+      // transfer, so only a silence clearly beyond this transfer's own cadence
+      // counts as backpressure. Before the first ACK (slow paths can need 10s
+      // for 2 MiB) allow a generous 12s window.
+      const silence = Date.now() - (sending.lastAckAt || sending.startedAt);
+      const cadence = sending.ackGapMs || 0;
+      const limit = cadence
+        ? Math.max(4000, Math.min(30000, cadence * 2.5 + 1000))
+        : 12000;
+      if (silence > limit) {
+        const queued = state.ws ? state.ws.bufferedAmount : 0;
+        return {
+          key: "backpressure",
+          text: queued > 1024 * 1024 ? "链路拥塞，正在缓冲" : "接收端处理中，暂停发送",
+          tone: "warn",
+        };
+      }
+    }
+    const recv = active.find((t) => t.direction === "recv");
+    return {
+      key: "transferring",
+      text: recv ? "接收中 · 写入本机" : "中继转发中 · 不落盘",
+      tone: "ok",
+    };
+  }
+  const all = [...state.transfers.values()];
+  const latestDone = all
+    .filter((t) => !t.restored && (t.state === "completed" || t.state === "received"))
+    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+  const latestFailed = all
+    .filter((t) => t.state === "failed")
+    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+  if (
+    latestFailed &&
+    (!latestDone || (latestFailed.startedAt || 0) >= (latestDone.startedAt || 0))
+  ) {
+    return { key: "error", text: `传输失败：${latestFailed.error || "未知原因"}`, tone: "bad" };
+  }
+  if (latestDone) {
+    return { key: "done", text: "通道已释放，文件仅在你的设备", tone: "ok" };
+  }
+  if (!state.peerReady) {
+    return { key: "waiting-peer", text: "等待对端加入", tone: "" };
+  }
+  const hasSend = [...state.transfers.values()].some((t) => t.direction === "send");
+  return {
+    key: "waiting",
+    text: hasSend ? "等待接收者接受" : "对端已就绪 · 等待选择文件",
+    tone: "",
+  };
+}
+
+const CHANNEL_CLASS = {
+  transferring: "flow",
+  paused: "warn",
+  backpressure: "warn",
+  reconnecting: "warn",
+  done: "done",
+  error: "bad",
+};
+
+function renderStatus() {
+  const ui = computeUiState();
+  const line = $("statusLine");
+  if (!line) return;
+  line.className = "status-line" + (ui.tone ? " " + ui.tone : "");
+  $("statusText").textContent = ui.text;
+  $("statusDot").className = "dot " + (ui.tone || "");
+  const channel = $("channel");
+  channel.className =
+    "channel " + (CHANNEL_CLASS[ui.key] || (state.peerReady ? "ready" : ""));
+  // The dot's traversal speed follows the measured throughput.
+  const active = activeTransfers()[0];
+  const speed = active ? active.speed || 0 : 0;
+  const dur = Math.max(0.45, Math.min(2.2, 2.2 - (speed / (1024 * 1024)) * 0.12));
+  channel.style.setProperty("--flow-dur", `${dur.toFixed(2)}s`);
+}
+
+function currentConnId() {
+  return state.connId;
+}
+
+function send(msg) {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return false;
+  if (state.dropNextControl === msg.type) {
+    state.dropNextControlCount -= 1;
+    if (state.dropNextControlCount <= 0) state.dropNextControl = null;
+    log(`TEST: 丢弃控制帧 ${msg.type}`);
+    return true;
+  }
+  state.ws.send(JSON.stringify({
+    v: PROTOCOL_VERSION,
+    clientId,
+    connId: state.connId,
+    ...msg,
+  }));
+  return true;
+}
+
+function sendHello(force = false) {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+  if (!force && state.helloSentFor === state.connId) return;
+  state.helloSentFor = state.connId;
+  // The password hash is only needed on the first hello of a connection.
+  // Later hellos (peer-joined / reply) must not keep rebroadcasting it.
+  const includeAuth = state.authSentFor !== state.connId;
+  if (includeAuth) state.authSentFor = state.connId;
+  const msg = {
+    type: "hello",
+    protocol: PROTOCOL_VERSION,
+    capabilities: {
+      resume: false,
+      maxChunkSize: MAX_CHUNK_SIZE,
+      defaultWindowSize: WINDOW_SIZE,
+    },
+    sentAt: Date.now(),
+  };
+  if (includeAuth && state.passwordHash) msg.auth = state.passwordHash;
+  send(msg);
+}
+
+function randomU32() {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return a[0] || 1;
+}
+
+function newTransferId() {
+  for (let i = 0; i < 20; i++) {
+    const id = randomU32();
+    if (!state.transfers.has(id)) return id;
+  }
+  throw new Error("could not allocate transferId");
+}
+
+function randomRoomId() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function roomFromPath() {
+  const m = location.pathname.match(/^\/r\/([^/]+)$/);
+  if (m) return decodeURIComponent(m[1]);
+  const q = new URLSearchParams(location.search).get("room");
+  return q || null;
+}
+
+function startWithRoom(roomId) {
+  state.roomId = roomId;
+  $("joinView").classList.add("hidden");
+  $("pwView").classList.add("hidden");
+  $("appView").classList.remove("hidden");
+  $("roomLabel").textContent = roomId;
+  setupShare(roomId);
+  log(`房间 ${roomId}`);
+  connect();
+  restoreReceivedFiles().catch((err) => {
+    log(`恢复接收列表失败: ${err.message || err}`);
+  });
+  renderStatus();
+}
+
+// ---------- Share link + QR ----------
+
+function shareLinkFor(roomId) {
+  return `${location.origin}/r/${encodeURIComponent(roomId)}`;
+}
+
+function setupShare(roomId) {
+  const link = shareLinkFor(roomId);
+  $("shareLink").value = link;
+  $("shareCode").textContent = roomId;
+  const badge = $("pwBadge");
+  if (state.passwordHash) {
+    badge.textContent = "密码房间";
+    badge.classList.add("on");
+  } else {
+    badge.textContent = "公开房间";
+    badge.classList.remove("on");
+  }
+  try {
+    const qr = qrcode(0, "M");
+    qr.addData(link);
+    qr.make();
+    const n = qr.getModuleCount();
+    const quiet = 4;
+    const scale = Math.max(2, Math.floor(200 / (n + quiet * 2)));
+    const dim = (n + quiet * 2) * scale;
+    const canvas = $("qrCanvas");
+    canvas.width = dim;
+    canvas.height = dim;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, dim, dim);
+    ctx.fillStyle = "#0e1116";
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        if (qr.isDark(r, c)) {
+          ctx.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
+        }
+      }
+    }
+    state.qrMatrix = Array.from({ length: n }, (_, r) =>
+      Array.from({ length: n }, (_, c) => qr.isDark(r, c)),
+    );
+  } catch (err) {
+    log(`二维码生成失败: ${err.message}`);
+    state.qrMatrix = null;
+  }
+}
+
+function toggleShare(show) {
+  const box = $("shareBox");
+  const visible = show === undefined ? box.classList.contains("hidden") : show;
+  box.classList.toggle("hidden", !visible);
+  $("shareBtn").textContent = visible ? "收起" : "分享";
+}
+
+async function copyShareLink() {
+  const link = $("shareLink").value;
+  try {
+    await navigator.clipboard.writeText(link);
+    $("copyHint").textContent = "已复制";
+  } catch {
+    const input = $("shareLink");
+    input.select();
+    document.execCommand("copy");
+    $("copyHint").textContent = "已复制";
+  }
+  setTimeout(() => { $("copyHint").textContent = ""; }, 2000);
+}
+
+function connect() {
+  if (state.stopped || !state.roomId) return;
+  clearTimeout(state.reconnectTimer);
+  state.connId = crypto.randomUUID();
+  state.peerReady = false;
+  state.helloSentFor = null;
+  state.authSentFor = null;
+  state.lastHelloReplyFor = null;
+  state.serverNonce = crypto.randomUUID();
+  // The peer's connId belongs to its old connection; a fresh one arrives via
+  // presence/hello. Keeping it would make the stale-frame filter drop them.
+  state.peer.connId = null;
+  setPeer("等待对端", "");
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const url = `${proto}//${location.host}/ws/${encodeURIComponent(state.roomId)}` +
+    `?clientId=${encodeURIComponent(clientId)}&connId=${encodeURIComponent(state.connId)}&v=${PROTOCOL_VERSION}`;
+  // Per-connection token. The server echoes it in the 101 subprotocol and
+  // tags every presence frame with it; a peer cannot forge server events.
+  const protocolToken = "relay.v1." + state.serverNonce;
+  const ws = new WebSocket(url, [protocolToken]);
+  ws.binaryType = "arraybuffer";
+  state.ws = ws;
+  setConn("连接中", "warn");
+
+  ws.onopen = () => {
+    if (ws.protocol !== protocolToken) {
+      log("服务端未回显连接 nonce，停止连接");
+      state.stopped = true;
+      state.stoppedCode = 4002;
+      setConn("连接终止 (4002)", "bad");
+      try {
+        ws.close(4002, "nonce_not_echoed");
+      } catch {
+        // Already closed.
+      }
+      renderStatus();
+      return;
+    }
+    state.reconnectVisible = false;
+    clearTimeout(state.reconnectTimerUi);
+    setConn("已连接", "ok");
+    log("WebSocket 已连接");
+    state.reconnectAttempt = 0;
+    sendHello(true);
+    renderStatus();
+  };
+
+  ws.onmessage = (event) => {
+    state.messageChain = state.messageChain
+      .then(() => handleMessage(event.data))
+      .catch((err) => {
+        console.error(err);
+        log(`处理消息失败: ${err.message}`);
+      });
+  };
+
+  ws.onclose = (event) => {
+    state.ws = null;
+    state.peerReady = false;
+    clearTimeout(state.peerOfflineTimer);
+    setPeer("离线", "bad");
+    if (event.code === 4001) {
+      state.stopped = true;
+      state.stoppedCode = 4001;
+      setConn("已被其他标签页接管", "warn");
+      log("close 4001：停止自动重连");
+      renderStatus();
+      return;
+    }
+    if (event.code === 4005) {
+      state.stopped = true;
+      state.stoppedCode = 4005;
+      log(`close 4005: ${event.reason || ""}`);
+      showPasswordPrompt(event.reason || "");
+      renderStatus();
+      return;
+    }
+    if ([4002, 4003, 4004].includes(event.code)) {
+      state.stopped = true;
+      state.stoppedCode = event.code;
+      setConn(`连接终止 (${event.code})`, "bad");
+      log(`close ${event.code}: ${event.reason || ""}；停止自动重连`);
+      renderStatus();
+      return;
+    }
+    setConn("重新连接中", "warn");
+    log(`连接关闭 (${event.code})，准备重连`);
+    // 700ms grace: a quick reconnect must not flash the UI state.
+    state.disconnectAt = Date.now();
+    clearTimeout(state.reconnectTimerUi);
+    state.reconnectTimerUi = setTimeout(() => {
+      state.reconnectVisible = true;
+      renderStatus();
+    }, 700);
+    renderStatus();
+    scheduleReconnect();
+  };
+
+  ws.onerror = () => {
+    // onclose handles recovery.
+  };
+}
+
+function scheduleReconnect() {
+  if (state.stopped || state.reconnectPaused) return;
+  const delays = [500, 1000, 2000, 4000, 8000, 10000];
+  const delay = delays[Math.min(state.reconnectAttempt, delays.length - 1)] + Math.random() * 250;
+  state.reconnectAttempt++;
+  clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = setTimeout(connect, delay);
+}
+
+function updatePeerFrom(msg) {
+  state.peer.clientId = msg.clientId;
+  state.peer.connId = msg.connId;
+}
+
+function handleServer(msg) {
+  if (msg.type !== "presence") return;
+  // Only the server knows the nonce of this connection. A peer can send a
+  // JSON frame with from:"server", but it cannot know this value.
+  if (!state.serverNonce || msg.nonce !== state.serverNonce) return;
+  const peer = msg.peer || {};
+  if (msg.event === "peer-joined") {
+    // Server greetings can repeat a peer we already know; treat as idempotent
+    // or every repeat would reset peerReady and wait for a hello that the
+    // peer has no reason to resend.
+    if (peer.connId && peer.connId === state.peer.connId && state.peerReady) {
+      return;
+    }
+    clearTimeout(state.peerOfflineTimer);
+    state.peer.clientId = peer.clientId || state.peer.clientId;
+    state.peer.connId = peer.connId || null;
+    state.peerReady = false;
+    setPeer("对端已连接，握手中", "warn");
+    log(`对端加入 conn=${String(peer.connId).slice(0, 8)}`);
+    sendHello(true);
+  } else if (msg.event === "peer-offline") {
+    if (state.peer.connId && peer.connId && state.peer.connId !== peer.connId) return;
+    state.peerReady = false;
+    setPeer("对端离线", "bad");
+    log("对端离线");
+    clearTimeout(state.peerOfflineTimer);
+    // A short replacement/reconnect keeps the transfer alive. If the peer is
+    // still gone after 3s, suspend outgoing work instead of failing it: the
+    // sender keeps fileId/offset and re-offers on reconnect. Receivers fail
+    // their in-memory transfer but keep OPFS meta for the next offer.
+    state.peerOfflineTimer = setTimeout(() => {
+      if (!state.peerReady) suspendOrFailActiveTransfers("peer_offline");
+    }, 3000);
+  }
+}
+
+async function handleMessage(data) {
+  if (typeof data !== "string") {
+    await handleBinary(data);
+    return;
+  }
+  if (data.length > CONTROL_MAX_BYTES) {
+    log("控制帧过大，已丢弃");
+    return;
+  }
+  let msg;
+  try {
+    msg = JSON.parse(data);
+  } catch {
+    log("收到非法 JSON 控制帧");
+    return;
+  }
+
+  if (msg.from === "server") {
+    handleServer(msg);
+    return;
+  }
+  if (msg.v !== PROTOCOL_VERSION) {
+    log(`协议版本不匹配: ${msg.v}`);
+    return;
+  }
+
+  // Stale frames from an old connection are dropped.
+  if (state.peer.connId && msg.connId && msg.connId !== state.peer.connId) return;
+  if (state.peer.clientId && msg.clientId && msg.clientId !== state.peer.clientId) return;
+  if (!state.peer.clientId && msg.clientId) {
+    state.peer.clientId = msg.clientId;
+  }
+  if (!state.peer.connId && msg.connId) {
+    state.peer.connId = msg.connId;
+  }
+
+  switch (msg.type) {
+    case "hello":
+      state.peerReady = true;
+      setPeer("对端在线", "ok");
+      log("收到 hello，对端就绪");
+      // Reply once per peer connection. A peer that just reconnected needs
+      // our hello; replying to every hello would create an endless ping-pong.
+      if (state.lastHelloReplyFor !== state.peer.connId) {
+        state.lastHelloReplyFor = state.peer.connId;
+        sendHello(true);
+      }
+      resumeOutgoing();
+      sendNextInBatch();
+      break;
+    case "file-offer":
+      await handleOffer(msg);
+      break;
+    case "file-accept":
+      await handleAccept(msg);
+      break;
+    case "file-reject":
+      handleReject(msg);
+      break;
+    case "ack":
+      handleAck(msg);
+      break;
+    case "ack-query":
+      handleAckQuery(msg);
+      break;
+    case "pause":
+      handlePause(msg);
+      break;
+    case "resume":
+      handleResume(msg);
+      break;
+    case "complete":
+      await handleComplete(msg);
+      break;
+    case "complete-ack":
+      handleCompleteAck(msg);
+      break;
+    case "error":
+      handleError(msg);
+      break;
+    default:
+      // Unknown control frames are ignored for forward compatibility.
+      break;
+  }
+}
+
+// ---------- Binary framing ----------
+
+function encodeChunk(transferId, offset, payload, final) {
+  const buf = new Uint8Array(HEADER_SIZE + payload.byteLength);
+  buf[0] = MAGIC_0;
+  buf[1] = MAGIC_1;
+  buf[2] = PROTOCOL_VERSION;
+  buf[3] = final ? FLAG_FINAL : 0;
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(4, transferId, false);
+  dv.setBigUint64(8, BigInt(offset), false);
+  buf.set(new Uint8Array(payload), HEADER_SIZE);
+  return buf.buffer;
+}
+
+function decodeChunk(buffer) {
+  if (!(buffer instanceof ArrayBuffer) || buffer.byteLength < HEADER_SIZE) return null;
+  const u = new Uint8Array(buffer);
+  if (u[0] !== MAGIC_0 || u[1] !== MAGIC_1 || u[2] !== PROTOCOL_VERSION) return null;
+  const dv = new DataView(buffer);
+  const flags = u[3];
+  // v1 defines only FLAG_FINAL. Encrypted/reserved flags are not negotiable
+  // yet, so a frame carrying them is malformed rather than silently accepted.
+  if (flags & ~FLAG_FINAL) return null;
+  const offsetBig = dv.getBigUint64(8, false);
+  if (offsetBig > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return {
+    final: (flags & FLAG_FINAL) !== 0,
+    transferId: dv.getUint32(4, false),
+    offset: Number(offsetBig),
+    payload: new Uint8Array(buffer, HEADER_SIZE),
+  };
+}
+
+// ---------- OPFS helpers ----------
+
+async function roomDirectory(roomId) {
+  const root = await navigator.storage.getDirectory();
+  const relay = await root.getDirectoryHandle("relay", { create: true });
+  const safe = roomId.replace(/[^A-Za-z0-9_-]/g, "_") || "room";
+  return relay.getDirectoryHandle(safe, { create: true });
+}
+
+async function sha256Hex(input) {
+  const data = input instanceof ArrayBuffer ? input : new Uint8Array(input);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function metaBody(t, receivedBytes) {
+  return {
+    v: 1,
+    roomId: state.roomId,
+    fileId: t.fileId,
+    transferId: t.transferId,
+    senderClientId: t.senderClientId,
+    receiverClientId: clientId,
+    name: t.name,
+    path: t.path || t.name,
+    batchId: t.batchId || null,
+    batchIndex: t.batchIndex || 0,
+    batchTotal: t.batchTotal || 0,
+    expectedSize: t.expectedSize,
+    chunkSize: t.chunkSize,
+    receivedBytes,
+    updatedAt: Date.now(),
+  };
+}
+
+// Sender-supplied relative paths are display/test metadata only; storage stays
+// keyed by fileId, so traversal sequences cannot reach the filesystem.
+function sanitizeRelPath(p) {
+  const parts = String(p || "")
+    .split("/")
+    .filter((s) => s && s !== "." && s !== "..");
+  return parts.join("/") || "file";
+}
+
+async function writeMetaSlot(handle, metaVersion, epoch, body) {
+  const bodyJson = JSON.stringify(body);
+  const checksum = await sha256Hex(new TextEncoder().encode(bodyJson));
+  const slot = JSON.stringify({ v: 1, metaVersion, epoch, bodyJson, checksum });
+  const w = await handle.createWritable();
+  await w.write(slot);
+  await w.close();
+  // Read back and verify. A torn write leaves this slot invalid.
+  const text = await (await handle.getFile()).text();
+  const parsed = JSON.parse(text);
+  if (parsed.metaVersion !== metaVersion || parsed.checksum !== checksum) {
+    throw new Error("meta slot verification failed");
+  }
+  return parsed;
+}
+
+async function readMetaSlot(handle) {
+  try {
+    const text = await (await handle.getFile()).text();
+    const slot = JSON.parse(text);
+    if (!slot || typeof slot.bodyJson !== "string" || typeof slot.checksum !== "string") return null;
+    const checksum = await sha256Hex(new TextEncoder().encode(slot.bodyJson));
+    if (checksum !== slot.checksum) return null;
+    const body = JSON.parse(slot.bodyJson);
+    return { slot, body, checksum };
+  } catch {
+    return null;
+  }
+}
+
+async function loadMeta(a, b) {
+  const slots = await Promise.all([readMetaSlot(a), readMetaSlot(b)]);
+  const valid = [];
+  if (slots[0]) valid.push({ ...slots[0], name: "a" });
+  if (slots[1]) valid.push({ ...slots[1], name: "b" });
+  valid.sort((x, y) => y.slot.metaVersion - x.slot.metaVersion);
+  return valid[0] || null;
+}
+
+// OPFS keeps completed files across reloads; the in-memory transfer map does
+// not. Rebuilding the list from `.meta` keeps received files visible and
+// saveable after the page is reloaded or evicted by the OS.
+const META_FILE_RE =
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.meta\.([ab])$/i;
+
+async function restoreReceivedFiles() {
+  const roomId = state.roomId;
+  if (!roomId) return;
+  let dir;
+  try {
+    dir = await roomDirectory(roomId);
+  } catch {
+    return;
+  }
+  const slotsByFile = new Map();
+  try {
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind !== "file") continue;
+      const m = META_FILE_RE.exec(name);
+      if (!m) continue;
+      const key = m[1].toLowerCase();
+      if (!slotsByFile.has(key)) slotsByFile.set(key, {});
+      slotsByFile.get(key)[m[2].toLowerCase()] = name;
+    }
+  } catch {
+    return;
+  }
+
+  const restored = [];
+  for (const [fileId, slots] of slotsByFile) {
+    let loaded = null;
+    try {
+      const [a, b] = await Promise.all([
+        slots.a ? dir.getFileHandle(slots.a) : null,
+        slots.b ? dir.getFileHandle(slots.b) : null,
+      ]);
+      loaded = await loadMeta(a, b);
+    } catch {
+      loaded = null;
+    }
+    if (!loaded) continue;
+    const body = loaded.body || {};
+    const expected = Number(body.expectedSize) || 0;
+    const have = Number(body.receivedBytes) || 0;
+    if (!expected) continue;
+    const complete = have >= expected;
+    if (body.receiverClientId && body.receiverClientId !== clientId) continue;
+    if (state.roomId !== roomId) return;
+    const transferId = Number(body.transferId) || newTransferId();
+    if (state.transfers.has(transferId)) continue;
+    restored.push({
+      transferId,
+      fileId,
+      body,
+      expected,
+      have,
+      complete,
+      epoch: loaded.slot.epoch || null,
+      slot: loaded.name || "a",
+      metaVersion: Number(loaded.slot.metaVersion) || 0,
+      updatedAt: Number(body.updatedAt) || 0,
+    });
+  }
+  if (!restored.length || state.roomId !== roomId) return;
+  restored.sort((x, y) => x.updatedAt - y.updatedAt);
+
+  let added = 0;
+  for (const r of restored) {
+    if (state.transfers.has(r.transferId)) continue;
+    let binHandle;
+    try {
+      binHandle = await dir.getFileHandle(`${r.fileId}.bin`);
+    } catch {
+      continue;
+    }
+    state.transfers.set(r.transferId, {
+      transferId: r.transferId,
+      fileId: r.fileId,
+      direction: "recv",
+      name: r.body.name || r.fileId,
+      path: r.body.path || r.body.name || r.fileId,
+      batchId: r.body.batchId || null,
+      batchIndex: Number(r.body.batchIndex) || 0,
+      batchTotal: Number(r.body.batchTotal) || 0,
+      mime: r.body.mime || "application/octet-stream",
+      expectedSize: r.expected,
+      chunkSize: Number(r.body.chunkSize) || CHUNK_SIZE,
+      windowSize: Number(r.body.windowSize) || WINDOW_SIZE,
+      persistEvery: PERSIST_EVERY_CHUNKS,
+      senderClientId: r.body.senderClientId || null,
+      state: r.complete ? "received" : "partial",
+      writtenBytes: r.have,
+      receivedBytes: r.have,
+      metaVersion: r.metaVersion,
+      epoch: r.epoch,
+      currentSlot: r.slot,
+      finalReceived: r.complete,
+      startedAt: Date.now(),
+      restored: true,
+      binHandle,
+      dir,
+      hash: null,
+    });
+    added += 1;
+  }
+  if (!added) return;
+  renderIncoming();
+  log(`恢复接收列表 ${added} 个（含未完成）`);
+}
+
+// ---------- Sending ----------
+
+function sendOffer(t) {
+  return send({
+    type: "file-offer",
+    transferId: t.transferId,
+    fileId: t.fileId,
+    senderClientId: clientId,
+    receiverClientId: state.peer.clientId,
+    name: t.name,
+    path: t.path || t.name,
+    batchId: t.batchId || null,
+    batchIndex: t.batchIndex || 0,
+    batchTotal: t.batchTotal || 0,
+    size: t.size,
+    mime: t.mime,
+    chunkSize: t.chunkSize,
+    windowSize: t.windowSize,
+    resume: Number(t.ackedOffset) > 0,
+    sha256: null,
+  });
+}
+
+async function startSend(file, opts = {}) {
+  if (!file) return;
+  if (!state.peerReady || !state.peer.clientId) {
+    log("对端尚未就绪，暂不能发送");
+    return;
+  }
+  const activeSend = [...state.transfers.values()].some(
+    (t) => t.direction === "send" && ["offering", "sending", "completing"].includes(t.state),
+  );
+  if (activeSend) {
+    log("已有发送任务进行中；每个方向只允许一个活动传输");
+    return;
+  }
+  if (file.size === 0) {
+    log("空文件暂不支持");
+    return;
+  }
+  if (file.size > Number.MAX_SAFE_INTEGER) {
+    log("文件超过协议支持的大小");
+    return;
+  }
+  const transferId = newTransferId();
+  const t = {
+    transferId,
+    fileId: crypto.randomUUID(),
+    direction: "send",
+    name: file.name,
+    path: opts.path || file.name,
+    batchId: opts.batchId || null,
+    batchIndex: opts.batchIndex || 0,
+    batchTotal: opts.batchTotal || 0,
+    size: file.size,
+    mime: file.type || "application/octet-stream",
+    chunkSize: CHUNK_SIZE,
+    windowSize: WINDOW_SIZE,
+    state: "offering",
+    file,
+    sentOffset: 0,
+    ackedOffset: 0,
+    ackWaiters: [],
+    resumeWaiters: [],
+    paused: false,
+    cleanAcks: 0,
+    ackTimer: null,
+    completeTimer: null,
+    startedAt: Date.now(),
+  };
+  state.transfers.set(transferId, t);
+  renderOutgoing();
+  log(`发送 offer: ${t.path} (${fmtBytes(t.size)})`);
+  sendOffer(t);
+  armOfferTimer(t);
+}
+
+// ---------- Pending queue ----------
+
+function addPendingFiles(list) {
+  const items = [...list]
+    .filter((f) => f && f.size > 0)
+    .map((file) => ({ file, path: file.webkitRelativePath || file.name }));
+  addPendingItems(items);
+}
+
+function addPendingItems(items) {
+  const list = items.filter((i) => i.file && i.file.size > 0);
+  if (!list.length) {
+    log("没有可发送的文件（空文件已忽略）");
+    return;
+  }
+  for (const item of list) {
+    state.pending.push({ id: crypto.randomUUID(), file: item.file, path: item.path });
+  }
+  renderPending();
+}
+
+function renderPending() {
+  const box = $("pendingBox");
+  const listEl = $("pendingList");
+  const n = state.pending.length;
+  box.classList.toggle("hidden", n === 0);
+  if (n) {
+    const total = state.pending.reduce((sum, i) => sum + i.file.size, 0);
+    $("pendingSummary").textContent = `待传输 · ${n} 个文件 · 共 ${fmtBytes(total)}`;
+  }
+  $("sendBtn").textContent = n ? `开始发送（${n}）` : "开始发送";
+  refreshSendButton();
+  listEl.innerHTML = "";
+  for (const item of state.pending) {
+    const row = document.createElement("div");
+    row.className = "pending-row";
+    row.dataset.pendingId = item.id;
+    row.innerHTML = `
+      <span class="p-name"></span>
+      <span class="p-size mono"></span>
+      <button class="ghost p-remove">移除</button>
+    `;
+    row.querySelector(".p-name").textContent = item.path;
+    row.querySelector(".p-size").textContent = fmtBytes(item.file.size);
+    row.querySelector(".p-remove").addEventListener("click", () => {
+      state.pending = state.pending.filter((x) => x.id !== item.id);
+      renderPending();
+    });
+    listEl.appendChild(row);
+  }
+}
+
+function clearPending() {
+  if (!state.pending.length) return;
+  state.pending = [];
+  renderPending();
+}
+
+function refreshSendButton() {
+  const busy = [...state.transfers.values()].some(
+    (t) => t.direction === "send" && ["offering", "sending", "completing"].includes(t.state),
+  );
+  $("sendBtn").disabled = !state.pending.length || !state.peerReady || busy;
+}
+
+// ---------- Multi-file / folder batches ----------
+
+function enqueueItems(items) {
+  const list = items.filter((i) => i.file && i.file.size > 0);
+  if (!list.length) return;
+  const activeSend = [...state.transfers.values()].some(
+    (t) => t.direction === "send" && ["offering", "sending", "completing"].includes(t.state),
+  );
+  if (activeSend) {
+    log("当前批次尚未结束；请等待完成或先暂停/清理");
+    return;
+  }
+  list.sort((a, b) => a.path.localeCompare(b.path));
+  state.batch = {
+    id: crypto.randomUUID(),
+    items: list,
+    next: 0,
+    done: 0,
+    stopped: false,
+  };
+  updateBatchHint();
+  sendNextInBatch();
+}
+
+// Drag & drop with directory support: DataTransferItem.getAsEntry walks the
+// dropped tree so folders keep their relative paths like the picker does.
+async function filesFromDataTransfer(dt) {
+  const entries = dt.items
+    ? [...dt.items].map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null)).filter(Boolean)
+    : [];
+  if (!entries.length) {
+    return [...dt.files].map((file) => ({ file, path: file.name }));
+  }
+  const out = [];
+  const readAll = (reader) =>
+    new Promise((resolve) => reader.readEntries(resolve, () => resolve([])));
+  const walk = async (entry, prefix) => {
+    if (entry.isFile) {
+      const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+      out.push({ file, path: prefix + entry.name });
+      return;
+    }
+    if (entry.isDirectory) {
+      const reader = entry.createReader();
+      let batch;
+      do {
+        batch = await readAll(reader);
+        for (const child of batch) await walk(child, prefix + entry.name + "/");
+      } while (batch.length);
+    }
+  };
+  for (const entry of entries) await walk(entry, "");
+  return out;
+}
+
+async function sendNextInBatch() {
+  const b = state.batch;
+  if (!b || b.stopped || b.next >= b.items.length) {
+    updateBatchHint();
+    return;
+  }
+  const busy = [...state.transfers.values()].some(
+    (t) => t.direction === "send" && ["offering", "sending", "completing"].includes(t.state),
+  );
+  if (busy || !state.peerReady) {
+    updateBatchHint();
+    return;
+  }
+  const item = b.items[b.next];
+  b.next += 1;
+  updateBatchHint();
+  await startSend(item.file, {
+    path: item.path,
+    batchId: b.id,
+    batchIndex: b.next,
+    batchTotal: b.items.length,
+  });
+}
+
+function onBatchFileDone() {
+  const b = state.batch;
+  if (!b) return;
+  b.done += 1;
+  updateBatchHint();
+  sendNextInBatch();
+}
+
+function updateBatchHint() {
+  const el = $("batchHint");
+  if (!el) return;
+  const b = state.batch;
+  if (!b) {
+    el.textContent = "";
+    return;
+  }
+  if (b.stopped) {
+    el.textContent = `已停止：${b.done}/${b.items.length} 个文件`;
+    return;
+  }
+  el.textContent = `${Math.min(b.done, b.items.length)}/${b.items.length} 个文件`;
+}
+
+function armOfferTimer(t) {
+  clearTimeout(t.offerTimer);
+  t.offerRetries = t.offerRetries || 0;
+  t.offerTimer = setTimeout(() => {
+    if (t.state !== "offering") return;
+    if (t.offerRetries >= 3) {
+      failTransfer(t, "offer_timeout");
+      return;
+    }
+    t.offerRetries++;
+    log(`重发 offer (${t.offerRetries}/3)`);
+    sendOffer(t);
+    armOfferTimer(t);
+  }, 10000);
+}
+
+function resumeOutgoing() {
+  for (const t of state.transfers.values()) {
+    if (t.direction !== "send") continue;
+    if (t.state === "offering") {
+      sendOffer(t);
+      armOfferTimer(t);
+    } else if (t.state === "sending") {
+      // After a reconnect or a receiver reload the peer may have lost its
+      // in-memory transfer; a duplicate offer lets it re-register from OPFS
+      // and reply with its authoritative startOffset.
+      sendOffer(t);
+      const waiters = t.ackWaiters;
+      t.ackWaiters = [];
+      for (const resolve of waiters) resolve();
+      if (t.sentOffset > t.ackedOffset) armAckTimer(t);
+      pumpSend(t);
+    } else if (t.state === "completing") {
+      // A reconnect can happen right after the last frame; resend complete.
+      send({
+        type: "complete",
+        transferId: t.transferId,
+        fileId: t.fileId,
+        size: t.size,
+        sha256: null,
+      });
+      armCompleteTimer(t);
+    }
+  }
+}
+
+async function handleAccept(msg) {
+  const t = state.transfers.get(msg.transferId);
+  if (!t || t.direction !== "send" || msg.fileId !== t.fileId) return;
+  if (msg.completed) {
+    if (Number(msg.startOffset) !== t.size) {
+      failTransfer(t, "完成状态大小不符");
+      return;
+    }
+    t.state = "completed";
+    t.ackedOffset = t.size;
+    t.sentOffset = t.size;
+    clearTimeout(t.offerTimer);
+    clearTimeout(t.ackTimer);
+    clearTimeout(t.completeTimer);
+    log(`对端报告已完成: ${t.path || t.name}`);
+    renderOutgoing();
+    onBatchFileDone();
+    return;
+  }
+  if (t.state !== "offering") {
+    const start = Number(msg.startOffset);
+    if (t.state === "sending" && Number.isFinite(start)) {
+      const sameEpoch = !msg.epoch || !t.acceptEpoch || msg.epoch === t.acceptEpoch;
+      if (!sameEpoch) {
+        // A new receiver epoch means its OPFS state was rebuilt; its offset is
+        // authoritative even when it moved backwards.
+        t.ackedOffset = Math.max(0, Math.min(start, t.size));
+        t.sentOffset = t.ackedOffset;
+        t.acceptEpoch = msg.epoch;
+        t.acceptMetaVersion = msg.metaVersion;
+        windowBackoff(t);
+      } else if (start > t.ackedOffset) {
+        t.ackedOffset = start;
+        t.sentOffset = Math.max(t.sentOffset, start);
+      }
+    }
+    // A duplicate accept after a reconnect proves the peer is back. Wake any
+    // pump blocked in waitForAck and re-arm the stall watchdog: the drop may
+    // have happened while the pump was waiting and no ACK would arrive again.
+    wakeAckWaiters(t);
+    if (t.state === "sending") {
+      if (t.sentOffset > t.ackedOffset) armAckTimer(t);
+      setTimeout(() => pumpSend(t), 0);
+    }
+    return;
+  }
+  clearTimeout(t.offerTimer);
+  clearTimeout(t.retransmitTimer);
+  t.state = "sending";
+  t.acceptEpoch = msg.epoch;
+  t.acceptMetaVersion = msg.metaVersion;
+  t.ackedOffset = Number(msg.startOffset) || 0;
+  t.sentOffset = t.ackedOffset;
+  t.startedAt = Date.now();
+  wakeAckWaiters(t);
+  log(`offer 已接受，从 ${fmtBytes(t.sentOffset)} 开始发送`);
+  renderOutgoing();
+  // The old pump may still be unwinding from waitForAck; let it exit first.
+  setTimeout(() => pumpSend(t), 0);
+}
+
+function waitForOpenSocket(timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeoutMs;
+    const tick = () => {
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) return resolve();
+      if (Date.now() >= deadline) return reject(new Error("WebSocket 重连超时"));
+      setTimeout(tick, 200);
+    };
+    tick();
+  });
+}
+
+function pumpSend(t) {
+  if (t.state !== "sending") return;
+  if (t.pumping) return;
+  t.pumping = true;
+  (async () => {
+    try {
+      while (t.state === "sending") {
+        if (t.paused) {
+          await waitForResume(t);
+          continue;
+        }
+        if (t.sentOffset >= t.size) break;
+        const inFlight = t.sentOffset - t.ackedOffset;
+        if (inFlight >= t.windowSize * t.chunkSize) {
+          await waitForAck(t);
+          continue;
+        }
+        // A frozen path lets ws.send() queue without the network draining;
+        // don't pile more protocol windows into the browser buffer.
+        if (state.ws && state.ws.bufferedAmount > 4 * 1024 * 1024) {
+          await new Promise((r) => setTimeout(r, 100));
+          continue;
+        }
+        const end = Math.min(t.sentOffset + t.chunkSize, t.size);
+        const buf = await t.file.slice(t.sentOffset, end).arrayBuffer();
+        if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+          await waitForOpenSocket(120000);
+          if (t.state !== "sending") return;
+          continue;
+        }
+        const frame = encodeChunk(t.transferId, t.sentOffset, buf, end === t.size);
+        if (state.dropNextBinary > 0) {
+          state.dropNextBinary--;
+          log(`TEST: 丢弃一帧 ${fmtBytes(t.sentOffset)}`);
+        } else {
+          state.ws.send(frame);
+        }
+        t.sentOffset = end;
+        updateOutgoing(t);
+      }
+      if (t.state === "sending" && t.sentOffset >= t.size) {
+        t.state = "completing";
+        t.completeDelay = 4000;
+        send({
+          type: "complete",
+          transferId: t.transferId,
+          fileId: t.fileId,
+          size: t.size,
+          sha256: null,
+        });
+        log(`已发送全部数据，等待 complete-ack: ${t.name}`);
+        armCompleteTimer(t);
+        renderOutgoing();
+      }
+    } catch (err) {
+      failTransfer(t, err.message || String(err));
+    } finally {
+      t.pumping = false;
+    }
+  })();
+}
+
+function waitForAck(t) {
+  return new Promise((resolve) => {
+    t.ackWaiters.push(resolve);
+    armAckTimer(t);
+  });
+}
+
+function armAckTimer(t) {
+  clearTimeout(t.ackTimer);
+  t.ackTimer = setTimeout(() => {
+    if (t.state !== "sending" || t.paused) return;
+    if (t.sentOffset > t.ackedOffset) {
+      log(`ACK 停滞，发送 ack-query: ${t.name}`);
+      send({ type: "ack-query", transferId: t.transferId, fileId: t.fileId });
+      clearTimeout(t.retransmitTimer);
+      t.retransmitTimer = setTimeout(() => {
+        if (t.state !== "sending" || t.paused) return;
+        if (t.sentOffset > t.ackedOffset) {
+          log(`ACK 仍无进展，回退到 ${fmtBytes(t.ackedOffset)} 重传`);
+          windowBackoff(t);
+          t.sentOffset = t.ackedOffset;
+          const waiters = t.ackWaiters;
+          t.ackWaiters = [];
+          for (const resolve of waiters) resolve();
+          pumpSend(t);
+        }
+      }, 2000);
+      armAckTimer(t);
+    }
+  }, 10000);
+}
+
+function armCompleteTimer(t) {
+  clearTimeout(t.completeTimer);
+  // First retry after 4s, then back off up to 30s. A lost `complete` (or a
+  // frozen path) must not cost the old fixed 30s before anything moves.
+  const delay = t.completeDelay || 4000;
+  t.completeDelay = Math.min(delay * 2, 30000);
+  t.completeTimer = setTimeout(() => {
+    if (t.state !== "completing") return;
+    if (state.ws && state.ws.bufferedAmount > 4 * 1024 * 1024) {
+      log(`发送缓冲积压 ${fmtBytes(state.ws.bufferedAmount)}，暂缓 complete 重发`);
+      armCompleteTimer(t);
+      return;
+    }
+    log(`complete 无应答，重发: ${t.name}`);
+    send({ type: "complete", transferId: t.transferId, fileId: t.fileId, size: t.size, sha256: null });
+    armCompleteTimer(t);
+  }, delay);
+}
+
+function handleAck(msg) {
+  const t = state.transfers.get(msg.transferId);
+  if (!t || t.direction !== "send" || msg.fileId !== t.fileId) return;
+  if (t.acceptEpoch && msg.epoch && msg.epoch !== t.acceptEpoch) {
+    log("ack epoch 不匹配，忽略");
+    return;
+  }
+  if (t.acceptMetaVersion != null && Number(msg.metaVersion) < t.acceptMetaVersion) {
+    log("ack metaVersion 回退，忽略");
+    return;
+  }
+  const received = Number(msg.receivedBytes) || 0;
+  if (received > t.ackedOffset) {
+    const now = Date.now();
+    // ACKs are emitted per persist boundary (~2 MiB), so the normal gap grows
+    // as the path slows. Track it so the UI can tell "slow but healthy" apart
+    // from a real stall.
+    if (t.lastAckAt) {
+      // Cap the sample so a pause or a reconnect outage does not inflate the
+      // cadence the backpressure check compares against.
+      const gap = Math.min(now - t.lastAckAt, 15000);
+      t.ackGapMs = t.ackGapMs ? t.ackGapMs * 0.6 + gap * 0.4 : gap;
+    }
+    t.ackedOffset = Math.min(received, t.size);
+    t.gapRewound = false;
+    t.lastAckAt = now;
+    clearTimeout(t.ackTimer);
+    clearTimeout(t.retransmitTimer);
+    const waiters = t.ackWaiters;
+    t.ackWaiters = [];
+    for (const resolve of waiters) resolve();
+    // Grow the window only after a sustained clean run; any gap or stall
+    // drops it back to the default (see windowBackoff).
+    t.cleanAcks = (t.cleanAcks || 0) + 1;
+    if (t.cleanAcks >= 8 && t.windowSize < MAX_ADAPTIVE_WINDOW) {
+      t.windowSize = Math.min(MAX_ADAPTIVE_WINDOW, t.windowSize + 4);
+      t.cleanAcks = 0;
+      log(`窗口增至 ${t.windowSize} 片（${fmtBytes(t.windowSize * t.chunkSize)} 突发）`);
+    }
+    updateOutgoing(t);
+  }
+}
+
+function windowBackoff(t) {
+  t.cleanAcks = 0;
+  if (t.windowSize > MIN_ADAPTIVE_WINDOW) {
+    t.windowSize = MIN_ADAPTIVE_WINDOW;
+    log(`窗口回退至 ${t.windowSize} 片`);
+  }
+}
+
+function waitForResume(t) {
+  if (!t.resumeWaiters) t.resumeWaiters = [];
+  return new Promise((resolve) => t.resumeWaiters.push(resolve));
+}
+
+function wakeResumeWaiters(t) {
+  const waiters = t.resumeWaiters || [];
+  t.resumeWaiters = [];
+  for (const resolve of waiters) resolve();
+}
+
+function wakeAckWaiters(t) {
+  const waiters = t.ackWaiters || [];
+  t.ackWaiters = [];
+  for (const resolve of waiters) resolve();
+}
+
+function pauseTransfer(t) {
+  if (!t || t.direction !== "send" || t.paused) return;
+  if (t.state !== "sending") return;
+  t.paused = true;
+  clearTimeout(t.ackTimer);
+  clearTimeout(t.retransmitTimer);
+  send({ type: "pause", transferId: t.transferId, fileId: t.fileId, reason: "user" });
+  // The pump may be blocked in waitForAck. Wake it so it observes paused and
+  // parks in waitForResume instead of sleeping forever.
+  wakeAckWaiters(t);
+  log(`已暂停: ${t.name}`);
+  renderOutgoing();
+}
+
+function resumeTransfer(t) {
+  if (!t || t.direction !== "send" || !t.paused) return;
+  t.paused = false;
+  // Measure the next ACK silence from the resume, not from before the pause.
+  t.lastAckAt = Date.now();
+  send({ type: "resume", transferId: t.transferId, fileId: t.fileId, startOffset: t.ackedOffset });
+  wakeAckWaiters(t);
+  wakeResumeWaiters(t);
+  if (t.sentOffset > t.ackedOffset) armAckTimer(t);
+  log(`继续发送: ${t.name}`);
+  renderOutgoing();
+  pumpSend(t);
+}
+
+function handlePause(msg) {
+  const t = state.transfers.get(msg.transferId);
+  if (!t) return;
+  if (t.direction === "send") {
+    if (t.state !== "sending" || t.paused) return;
+    t.paused = true;
+    clearTimeout(t.ackTimer);
+    clearTimeout(t.retransmitTimer);
+    wakeAckWaiters(t);
+    log(`对端请求暂停: ${t.name}`);
+    renderOutgoing();
+  } else {
+    t.peerPaused = true;
+    log(`发送端已暂停: ${t.name}`);
+    updateIncoming(t);
+  }
+}
+
+function handleResume(msg) {
+  const t = state.transfers.get(msg.transferId);
+  if (!t) return;
+  if (t.direction === "send") {
+    if (!t.paused) return;
+    t.paused = false;
+    const start = Number(msg.startOffset);
+    if (Number.isFinite(start) && start > t.ackedOffset) {
+      t.ackedOffset = Math.min(start, t.size);
+    }
+    wakeAckWaiters(t);
+    wakeResumeWaiters(t);
+    if (t.sentOffset > t.ackedOffset) armAckTimer(t);
+    log(`对端已恢复: ${t.name}`);
+    renderOutgoing();
+    pumpSend(t);
+  } else {
+    const start = Number(msg.startOffset);
+    if (Number.isFinite(start) && start !== t.receivedBytes) {
+      send({
+        type: "error",
+        code: "stale_offset",
+        transferId: t.transferId,
+        fileId: t.fileId,
+        receivedBytes: t.receivedBytes,
+        fatal: false,
+      });
+      return;
+    }
+    t.peerPaused = false;
+    updateIncoming(t);
+  }
+}
+
+function handleAckQuery(msg) {
+  const t = state.transfers.get(msg.transferId);
+  if (!t || t.direction !== "recv") return;
+  sendAck(t);
+}
+
+function handleCompleteAck(msg) {
+  const t = state.transfers.get(msg.transferId);
+  if (!t || t.direction !== "send" || msg.fileId !== t.fileId) return;
+  const received = Number(msg.receivedBytes) || 0;
+  if (received !== t.size) {
+    log(`complete-ack 大小不符: ${received}/${t.size}`);
+    return;
+  }
+  if (t.acceptEpoch && msg.epoch && msg.epoch !== t.acceptEpoch) {
+    log("complete-ack epoch 不匹配，忽略");
+    return;
+  }
+  if (t.acceptMetaVersion != null && Number(msg.metaVersion) < t.acceptMetaVersion) {
+    log("complete-ack metaVersion 回退，忽略");
+    return;
+  }
+  clearTimeout(t.completeTimer);
+  clearTimeout(t.ackTimer);
+  clearTimeout(t.retransmitTimer);
+  t.state = "completed";
+  t.ackedOffset = t.size;
+  log(`传输完成: ${t.path || t.name}`);
+  renderOutgoing();
+  onBatchFileDone();
+}
+
+function handleReject(msg) {
+  const t = state.transfers.get(msg.transferId);
+  if (!t || t.direction !== "send") return;
+  if (msg.reason === "receiver_not_ready" || msg.reason === "peer_not_ready") {
+    const delay = Number(msg.retryAfterMs) || 2000;
+    log(`对端暂时未就绪 (${msg.reason})，${delay}ms 后重试`);
+    clearTimeout(t.offerTimer);
+    t.state = "offering";
+    setTimeout(() => {
+      if (t.state === "offering") {
+        sendOffer(t);
+        armOfferTimer(t);
+      }
+    }, delay);
+    return;
+  }
+  failTransfer(t, `rejected: ${msg.reason}`);
+}
+
+function handleError(msg) {
+  if (msg.code === "transfer_failed") {
+    // The receiver may fail its side when the peer is gone for longer than
+    // its offline grace (slow reconnects). Its OPFS meta survives, so a new
+    // offer resumes from the persisted offset. Retry a few times, then give up.
+    const t = state.transfers.get(msg.transferId);
+    if (t && t.direction === "send") {
+      t.failRetries = (t.failRetries || 0) + 1;
+      if (t.failRetries <= 3 && t.state !== "completed") {
+        log(`对端报告传输失败，${t.failRetries}/3 次，重新协商`);
+        clearTimeout(t.ackTimer);
+        clearTimeout(t.retransmitTimer);
+        clearTimeout(t.completeTimer);
+        t.state = "offering";
+        t.paused = false;
+        t.offerRetries = 0;
+        wakeAckWaiters(t);
+        wakeResumeWaiters(t);
+        setTimeout(() => {
+          if (t.state === "offering") {
+            sendOffer(t);
+            armOfferTimer(t);
+          }
+        }, 1000);
+        renderOutgoing();
+        return;
+      }
+    }
+  }
+  if (msg.code === "stale_offset") {
+    const t = state.transfers.get(msg.transferId);
+    if (t && t.direction === "send") {
+      log("offset 已过期，重新协商");
+      t.state = "offering";
+      t.paused = false;
+      t.offerRetries = 0;
+      clearTimeout(t.ackTimer);
+      clearTimeout(t.retransmitTimer);
+      clearTimeout(t.completeTimer);
+      wakeAckWaiters(t);
+      wakeResumeWaiters(t);
+      sendOffer(t);
+      armOfferTimer(t);
+    }
+    return;
+  }
+  if (msg.code === "offset_gap" || msg.code === "incomplete") {
+    const t = state.transfers.get(msg.transferId);
+    if (t && t.direction === "send") {
+      const received = Number(msg.receivedBytes) || 0;
+      if (received < t.ackedOffset) {
+        if (!t.gapRewound) {
+          t.gapRewound = true;
+          log(`${msg.code} 低于已确认 offset，重新协商`);
+          t.state = "offering";
+          t.paused = false;
+          t.offerRetries = 0;
+          clearTimeout(t.ackTimer);
+          clearTimeout(t.retransmitTimer);
+          clearTimeout(t.completeTimer);
+          wakeAckWaiters(t);
+          wakeResumeWaiters(t);
+          sendOffer(t);
+          armOfferTimer(t);
+        } else {
+          log(`忽略过期的 ${msg.code} (${fmtBytes(received)})`);
+        }
+        return;
+      }
+      t.gapRewound = false;
+      log(`${msg.code}，回退到 ${fmtBytes(received)} 重传`);
+      windowBackoff(t);
+      t.state = "sending";
+      t.sentOffset = received;
+      t.ackedOffset = received;
+      clearTimeout(t.completeTimer);
+      clearTimeout(t.retransmitTimer);
+      wakeAckWaiters(t);
+      setTimeout(() => pumpSend(t), 0);
+    }
+    return;
+  }
+  log(`对端错误: ${msg.code}${msg.detail ? " — " + msg.detail : ""}`);
+  if (msg.fatal) {
+    const t = state.transfers.get(msg.transferId);
+    if (t) failTransfer(t, msg.code);
+  }
+}
+
+function failTransfer(t, reason) {
+  if (!t) return;
+  const wasActive = t.state !== "failed" && t.state !== "completed" && t.state !== "received";
+  t.state = "failed";
+  t.error = reason;
+  clearTimeout(t.offerTimer);
+  clearTimeout(t.ackTimer);
+  clearTimeout(t.retransmitTimer);
+  clearTimeout(t.completeTimer);
+  if (t.direction === "recv" && t.io) {
+    t.io.close().catch(() => {});
+    t.io = null;
+  }
+  if (wasActive && t.direction === "recv" && !t.failureNotified) {
+    t.failureNotified = true;
+    send({
+      type: "error",
+      code: "transfer_failed",
+      transferId: t.transferId,
+      fileId: t.fileId,
+      fatal: true,
+    });
+  }
+  const waiters = t.ackWaiters || [];
+  t.ackWaiters = [];
+  for (const resolve of waiters) resolve();
+  log(`传输失败 (${reason}): ${t.path || t.name}`);
+  if (t.direction === "send") {
+    if (state.batch) {
+      state.batch.stopped = true;
+      updateBatchHint();
+    }
+    renderOutgoing();
+  } else renderIncoming();
+}
+
+function suspendOrFailActiveTransfers(reason) {
+  let suspended = 0;
+  for (const t of state.transfers.values()) {
+    if (t.direction === "send" &&
+        ["offering", "sending", "completing"].includes(t.state)) {
+      t.state = "offering";
+      t.paused = false;
+      t.offerRetries = 0;
+      clearTimeout(t.offerTimer);
+      clearTimeout(t.ackTimer);
+      clearTimeout(t.retransmitTimer);
+      clearTimeout(t.completeTimer);
+      wakeAckWaiters(t);
+      wakeResumeWaiters(t);
+      suspended++;
+    } else if (t.direction === "recv" && t.state === "receiving") {
+      failTransfer(t, reason);
+    }
+  }
+  if (suspended) {
+    log("对端离线，发送任务等待重连");
+    renderOutgoing();
+  }
+}
+
+// ---------- Receiving ----------
+
+async function handleOffer(msg) {
+  if (msg.receiverClientId !== clientId) return;
+  // Only a peer that completed hello may create a transfer. An unauthenticated
+  // or not-yet-ready connection must not be able to write into OPFS, and the
+  // offer must never be allowed to define the peer identity.
+  if (!state.peerReady || !state.peer.clientId) return;
+  if (msg.senderClientId !== state.peer.clientId) return;
+
+  const size = Number(msg.size);
+  const chunkSize = Number(msg.chunkSize);
+  const windowSize = Number(msg.windowSize);
+  const reject = (reason) => send({
+    type: "file-reject",
+    transferId: msg.transferId,
+    fileId: msg.fileId,
+    reason,
+  });
+  if (!Number.isSafeInteger(size) || size <= 0) {
+    reject("bad_message");
+    return;
+  }
+  if (!Number.isFinite(chunkSize) || chunkSize < MIN_CHUNK_SIZE || chunkSize > MAX_CHUNK_SIZE) {
+    reject("bad_chunk_size");
+    return;
+  }
+  if (!Number.isInteger(windowSize) || windowSize < 1 || windowSize > MAX_WINDOW_SIZE) {
+    reject("bad_window");
+    return;
+  }
+
+  let existing = state.transfers.get(msg.transferId);
+  if (existing && (existing.state === "failed" || existing.state === "partial")) {
+    // A failed attempt or a restored partial row may be retried from scratch
+    // with the same ids; prepareReceiver will load the OPFS meta again.
+    state.transfers.delete(msg.transferId);
+    existing = null;
+  }
+  if (existing) {
+    if (existing.direction !== "recv" || existing.fileId !== msg.fileId) {
+      send({
+        type: "error",
+        code: "transfer_id_conflict",
+        transferId: msg.transferId,
+        fileId: msg.fileId,
+        fatal: false,
+      });
+      return;
+    }
+    if (existing.expectedSize !== size) {
+      reject("size_mismatch");
+      return;
+    }
+    if (existing.state === "offered") {
+      if (state.autoAccept || (existing.batchId && state.autoAcceptBatch === existing.batchId)) {
+        await acceptOffer(existing);
+      } else {
+        // Keep the sender's offer alive while the user decides. The sender
+        // treats receiver_not_ready as a retry hint and does not fail.
+        send({
+          type: "file-reject",
+          transferId: msg.transferId,
+          fileId: msg.fileId,
+          reason: "receiver_not_ready",
+          retryAfterMs: 10000,
+        });
+      }
+      return;
+    }
+    // A duplicate offer means the sender is re-syncing. Any bytes written but
+    // not yet persisted are discarded; the sender will resend from the
+    // persisted offset. This keeps receivedBytes authoritative.
+    if (existing.state === "receiving" && existing.writtenBytes > existing.receivedBytes) {
+      await discardUnpersistedTail(existing);
+    }
+    if (existing.state === "received") {
+      send({
+        type: "file-accept",
+        transferId: msg.transferId,
+        fileId: msg.fileId,
+        startOffset: existing.receivedBytes,
+        metaVersion: existing.metaVersion,
+        epoch: existing.epoch,
+        completed: true,
+      });
+    } else {
+      send({
+        type: "file-accept",
+        transferId: msg.transferId,
+        fileId: msg.fileId,
+        startOffset: existing.receivedBytes,
+        metaVersion: existing.metaVersion,
+        epoch: existing.epoch,
+        completed: false,
+      });
+    }
+    return;
+  }
+
+  // Phase 1: one active receive direction at a time.
+  const activeRecv = [...state.transfers.values()].some(
+    (x) => x.direction === "recv" && x.state === "receiving",
+  );
+  if (activeRecv) {
+    reject("duplicate_file");
+    return;
+  }
+
+  const t = {
+    transferId: msg.transferId,
+    fileId: msg.fileId,
+    direction: "recv",
+    name: msg.name,
+    path: sanitizeRelPath(msg.path || msg.name),
+    batchId: typeof msg.batchId === "string" ? msg.batchId : null,
+    batchIndex: Number(msg.batchIndex) || 0,
+    batchTotal: Number(msg.batchTotal) || 0,
+    mime: msg.mime || "application/octet-stream",
+    expectedSize: size,
+    chunkSize,
+    windowSize,
+    persistEvery: Math.min(PERSIST_EVERY_CHUNKS, windowSize),
+    senderClientId: msg.senderClientId,
+    resume: Boolean(msg.resume),
+    state: "offered",
+    writtenBytes: 0,
+    receivedBytes: 0,
+    metaVersion: 0,
+    epoch: crypto.randomUUID(),
+    currentSlot: "a",
+    persistCount: 0,
+    finalReceived: false,
+    gapNotified: false,
+    startedAt: Date.now(),
+    hash: null,
+    completeAck: null,
+  };
+  state.transfers.set(t.transferId, t);
+  renderIncoming();
+  scrollIncomingIntoView(t.transferId);
+
+  const auto = state.autoAccept ||
+    (t.batchId && state.autoAcceptBatch === t.batchId);
+  if (auto) {
+    await acceptOffer(t);
+  } else {
+    log(`收到 offer，等待确认: ${t.path} (${fmtBytes(t.expectedSize)})`);
+  }
+}
+
+async function acceptOffer(t) {
+  if (!t || t.direction !== "recv" || t.state !== "offered") return;
+  const activeRecv = [...state.transfers.values()].some(
+    (x) => x !== t && x.direction === "recv" && x.state === "receiving",
+  );
+  if (activeRecv) {
+    rejectOffer(t, "duplicate_file");
+    return;
+  }
+  t.state = "receiving";
+  renderIncoming();
+  try {
+    await prepareReceiver(t, Boolean(t.resume));
+    send({
+      type: "file-accept",
+      transferId: t.transferId,
+      fileId: t.fileId,
+      startOffset: t.receivedBytes,
+      metaVersion: t.metaVersion,
+      epoch: t.epoch,
+      completed: t.receivedBytes >= t.expectedSize,
+    });
+    log(
+      `接收 offer: ${t.path} (${fmtBytes(t.expectedSize)})` +
+        (t.quotaAvail ? `，本机可用 ${fmtBytes(t.quotaAvail)}` : ""),
+    );
+  } catch (err) {
+    failTransfer(t, `准备接收失败: ${err.message}`);
+    send({
+      type: "file-reject",
+      transferId: t.transferId,
+      fileId: t.fileId,
+      reason: err.reason || "quota",
+    });
+  }
+}
+
+function rejectOffer(t, reason = "user_rejected") {
+  if (!t || t.direction !== "recv" || t.state !== "offered") return;
+  send({
+    type: "file-reject",
+    transferId: t.transferId,
+    fileId: t.fileId,
+    reason,
+  });
+  state.transfers.delete(t.transferId);
+  renderIncoming();
+  log(`已拒绝接收: ${t.path}`);
+}
+
+function acceptBatch(t) {
+  if (!t) return;
+  if (t.batchId) state.autoAcceptBatch = t.batchId;
+  acceptOffer(t);
+}
+
+// ---------- OPFS sync writer (worker) ----------
+// Chromium's createWritable({keepExistingData:true}) costs O(file size) per
+// open, so closing and reopening per persist boundary degrades large
+// transfers. A FileSystemSyncAccessHandle opened once and flushed per
+// boundary costs O(dirty data) instead.
+
+const IO_WORKER_SRC = `
+let handle = null;
+self.onmessage = (e) => {
+  const { id, op, data } = e.data;
+  const done = (msg) => self.postMessage({ id, ...msg });
+  const fail = (err) => done({ ok: false, error: String((err && err.message) || err) });
+  try {
+    if (op === "open") {
+      data.fileHandle
+        .createSyncAccessHandle()
+        .then((h) => {
+          try {
+            if (typeof data.truncateTo === "number") h.truncate(data.truncateTo);
+            handle = h;
+            done({ ok: true, result: { size: h.getSize() } });
+          } catch (err) {
+            fail(err);
+          }
+        })
+        .catch(fail);
+      return;
+    }
+    if (!handle) throw new Error("io not open");
+    if (op === "write") {
+      const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      let written = 0;
+      while (written < view.byteLength) {
+        const n = handle.write(view.subarray(written), { at: data.offset + written });
+        if (n <= 0) throw new Error("write made no progress");
+        written += n;
+      }
+      done({ ok: true, result: { written } });
+    } else if (op === "flush") {
+      handle.flush();
+      done({ ok: true, result: { size: handle.getSize() } });
+    } else if (op === "truncate") {
+      handle.truncate(data.size);
+      done({ ok: true, result: { size: handle.getSize() } });
+    } else if (op === "close") {
+      handle.close();
+      handle = null;
+      done({ ok: true });
+    } else {
+      throw new Error("unknown op " + op);
+    }
+  } catch (err) {
+    fail(err);
+  }
+};
+`;
+
+class FileIo {
+  constructor(fileHandle) {
+    this.fileHandle = fileHandle;
+    this.pending = new Map();
+    this.nextId = 1;
+    const workerUrl = URL.createObjectURL(
+      new Blob([IO_WORKER_SRC], { type: "text/javascript" }),
+    );
+    this.worker = new Worker(workerUrl);
+    URL.revokeObjectURL(workerUrl);
+    this.worker.onmessage = (e) => {
+      const { id, ok, result, error } = e.data;
+      const p = this.pending.get(id);
+      if (!p) return;
+      this.pending.delete(id);
+      if (ok) p.resolve(result);
+      else p.reject(new Error(error));
+    };
+  }
+  call(op, data = {}, transfer = []) {
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.worker.postMessage({ id, op, data }, transfer);
+    });
+  }
+  open(truncateTo) {
+    return this.call("open", { fileHandle: this.fileHandle, truncateTo });
+  }
+  write(offset, buffer, byteOffset, byteLength) {
+    return this.call("write", { offset, buffer, byteOffset, byteLength }, [buffer]);
+  }
+  flush() {
+    return this.call("flush");
+  }
+  truncate(size) {
+    return this.call("truncate", { size });
+  }
+  async close() {
+    try {
+      await this.call("close");
+    } finally {
+      this.worker.terminate();
+    }
+  }
+}
+
+async function prepareReceiver(t, resume) {
+  // Reject early when the device cannot hold the file; failing halfway leaves
+  // the user staring at a transfer that can never finish.
+  try {
+    const est = await navigator.storage.estimate();
+    const avail = (est.quota || 0) - (est.usage || 0);
+    t.quotaAvail = avail;
+    if (avail > 0 && t.expectedSize > avail * 0.95) {
+      const err = new Error("not enough local storage");
+      err.reason = "quota";
+      throw err;
+    }
+  } catch (err) {
+    if (err && err.reason === "quota") throw err;
+  }
+
+  t.dir = await roomDirectory(state.roomId);
+  t.binHandle = await t.dir.getFileHandle(`${t.fileId}.bin`, { create: true });
+  t.metaA = await t.dir.getFileHandle(`${t.fileId}.meta.a`, { create: true });
+  t.metaB = await t.dir.getFileHandle(`${t.fileId}.meta.b`, { create: true });
+
+  // Resume whenever a valid meta exists for this fileId on disk. This covers
+  // both sender-driven retries and a receiver page reload, where the page
+  // has no in-memory state left but OPFS still records receivedBytes.
+  const loaded = await loadMeta(t.metaA, t.metaB);
+
+  if (loaded) {
+    const body = loaded.body;
+    if (Number(body.expectedSize) !== t.expectedSize) {
+      const err = new Error("size mismatch");
+      err.reason = "size_mismatch";
+      throw err;
+    }
+    t.receivedBytes = Number(body.receivedBytes) || 0;
+    t.metaVersion = Number(loaded.slot.metaVersion) || 0;
+    t.epoch = loaded.slot.epoch || t.epoch;
+    t.currentSlot = loaded.name;
+    t.writtenBytes = t.receivedBytes;
+    t.chunkSize = Number(body.chunkSize) || t.chunkSize;
+    t.windowSize = Number(body.windowSize) || t.windowSize;
+    // Drop any unpersisted tail before continuing.
+    t.io = new FileIo(t.binHandle);
+    await t.io.open(t.receivedBytes);
+    log(`恢复接收状态: ${fmtBytes(t.receivedBytes)} / ${fmtBytes(t.expectedSize)}`);
+  } else {
+    // Bump past any stale slot so a fresh state always wins on the next load.
+    const old = await loadMeta(t.metaA, t.metaB);
+    const baseVersion = old ? Number(old.slot.metaVersion) + 1 : 0;
+    const slotName = old && old.name === "a" ? "b" : "a";
+    t.receivedBytes = 0;
+    t.writtenBytes = 0;
+    t.metaVersion = baseVersion;
+    t.epoch = crypto.randomUUID();
+    t.currentSlot = slotName;
+    await writeMetaSlot(
+      slotName === "a" ? t.metaA : t.metaB,
+      baseVersion,
+      t.epoch,
+      metaBody(t, 0),
+    );
+    t.io = new FileIo(t.binHandle);
+    await t.io.open(0); // truncates the file
+  }
+  t.persistCount = 0;
+}
+
+async function discardUnpersistedTail(t) {
+  if (!t || t.direction !== "recv") return;
+  t.writtenBytes = t.receivedBytes;
+  t.persistCount = 0;
+  t.gapNotified = false;
+  if (!t.io) return;
+  try {
+    await t.io.truncate(t.receivedBytes);
+    log(`丢弃未持久化尾部，回到 ${fmtBytes(t.receivedBytes)}`);
+  } catch (err) {
+    log(`丢弃未持久化尾部失败: ${err.message}`);
+  }
+}
+
+async function handleBinary(buffer) {
+  const chunk = decodeChunk(buffer);
+  if (!chunk) {
+    log("收到非法二进制帧，已丢弃");
+    return;
+  }
+  const t = state.transfers.get(chunk.transferId);
+  if (!t || t.direction !== "recv") {
+    send({
+      type: "error",
+      code: "unknown_transfer",
+      transferId: chunk.transferId,
+      fatal: false,
+    });
+    return;
+  }
+  if (t.state !== "receiving") {
+    // Late frame after failure/completion; duplicate rules make this safe.
+    if (t.state === "received" && chunk.offset < t.receivedBytes) return;
+    return;
+  }
+  // A retransmit can land inside the unpersisted tail. Drop that tail first,
+  // otherwise the frame would be classified as a duplicate and lost forever.
+  if (
+    chunk.offset < t.writtenBytes &&
+    t.writtenBytes > t.receivedBytes &&
+    chunk.offset >= t.receivedBytes
+  ) {
+    await discardUnpersistedTail(t);
+  }
+  if (chunk.offset < t.writtenBytes) {
+    // Duplicate retransmits during a storm can arrive many times per second;
+    // one cumulative ACK every 250ms is enough to unstick the sender.
+    const now = Date.now();
+    if (
+      t.receivedBytes > 0 &&
+      (!t.lastDupAckAt || now - t.lastDupAckAt >= 250)
+    ) {
+      t.lastDupAckAt = now;
+      sendAck(t);
+    }
+    return;
+  }
+  if (chunk.offset > t.writtenBytes) {
+    // One gap notification is enough; the sender will rewind and retransmit.
+    if (!t.gapNotified) {
+      t.gapNotified = true;
+      send({
+        type: "error",
+        code: "offset_gap",
+        transferId: t.transferId,
+        fileId: t.fileId,
+        receivedBytes: t.receivedBytes,
+        fatal: false,
+      });
+    }
+    return;
+  }
+  if (chunk.payload.byteLength === 0) {
+    send({
+      type: "error",
+      code: "bad_message",
+      transferId: t.transferId,
+      fileId: t.fileId,
+      fatal: true,
+    });
+    failTransfer(t, "empty chunk");
+    return;
+  }
+  if (chunk.payload.byteLength > t.chunkSize) {
+    send({
+      type: "error",
+      code: "bad_chunk_size",
+      transferId: t.transferId,
+      fileId: t.fileId,
+      fatal: true,
+    });
+    failTransfer(t, "chunk too large");
+    return;
+  }
+
+  if (state.writeDelayMs) {
+    await new Promise((r) => setTimeout(r, state.writeDelayMs));
+  }
+  const writeStart = performance.now();
+  const payloadLen = chunk.payload.byteLength;
+  await t.io.write(chunk.offset, chunk.payload.buffer, chunk.payload.byteOffset, payloadLen);
+  t.writeMs = (t.writeMs || 0) + (performance.now() - writeStart);
+  t.writtenBytes += payloadLen;
+  t.persistCount++;
+  t.gapNotified = false;
+  if (chunk.final) t.finalReceived = true;
+
+  if (t.finalReceived && t.writtenBytes !== t.expectedSize) {
+    send({
+      type: "error",
+      code: "final_size_mismatch",
+      transferId: t.transferId,
+      fileId: t.fileId,
+      fatal: true,
+    });
+    failTransfer(t, "final size mismatch");
+    return;
+  }
+
+  if (
+    t.persistCount >= (t.persistEvery || PERSIST_EVERY_CHUNKS) ||
+    t.finalReceived ||
+    t.writtenBytes >= t.expectedSize
+  ) {
+    await persistReceiver(t);
+  }
+  updateIncoming(t);
+}
+
+async function persistReceiver(t) {
+  if (!t.io) return;
+  const prev = {
+    receivedBytes: t.receivedBytes,
+    metaVersion: t.metaVersion,
+    currentSlot: t.currentSlot,
+  };
+  const flushStart = performance.now();
+  await t.io.flush();
+  const flushMs = performance.now() - flushStart;
+  t.flushMs = (t.flushMs || 0) + flushMs;
+  if (flushMs > 1000) log(`持久化 flush 耗时 ${Math.round(flushMs)}ms`);
+
+  const newReceived = t.writtenBytes;
+  const newVersion = prev.metaVersion + 1;
+  const nextSlot = prev.currentSlot === "a" ? "b" : "a";
+
+  try {
+    const metaStart = performance.now();
+    await writeMetaSlot(
+      nextSlot === "a" ? t.metaA : t.metaB,
+      newVersion,
+      t.epoch,
+      metaBody(t, newReceived),
+    );
+    t.metaMs = (t.metaMs || 0) + (performance.now() - metaStart);
+    t.receivedBytes = newReceived;
+    t.metaVersion = newVersion;
+    t.currentSlot = nextSlot;
+  } catch (err) {
+    // Roll back to the last known good slot and discard the unpersisted tail.
+    t.receivedBytes = prev.receivedBytes;
+    t.metaVersion = prev.metaVersion;
+    t.currentSlot = prev.currentSlot;
+    t.writtenBytes = prev.receivedBytes;
+    try {
+      await t.io.truncate(prev.receivedBytes);
+    } catch {
+      t.io = null;
+    }
+    t.persistCount = 0;
+    log(`meta 写入失败，回退到 ${fmtBytes(prev.receivedBytes)}`);
+    failTransfer(t, "meta_write_failed");
+    return;
+  }
+
+  t.persistCount = 0;
+  sendAck(t);
+
+  if (t.receivedBytes >= t.expectedSize) {
+    t.state = "received";
+    // Release the exclusive sync handle so hashing/download can open the file.
+    try {
+      await t.io.close();
+    } catch {}
+    t.io = null;
+    updateIncoming(t);
+    log(`接收完成: ${t.name}`);
+    computeHash(t).catch(() => {});
+  } else {
+    updateIncoming(t);
+  }
+}
+
+function sendAck(t) {
+  send({
+    type: "ack",
+    transferId: t.transferId,
+    fileId: t.fileId,
+    receivedBytes: t.receivedBytes,
+    metaVersion: t.metaVersion,
+    epoch: t.epoch,
+  });
+}
+
+async function handleComplete(msg) {
+  const t = state.transfers.get(msg.transferId);
+  if (!t || t.direction !== "recv" || msg.fileId !== t.fileId) return;
+  if (t.state === "failed") {
+    send({
+      type: "error",
+      code: "transfer_failed",
+      transferId: t.transferId,
+      fileId: t.fileId,
+      fatal: true,
+    });
+    return;
+  }
+  if (t.state !== "received" || t.receivedBytes !== t.expectedSize) {
+    send({
+      type: "error",
+      code: "incomplete",
+      transferId: t.transferId,
+      fileId: t.fileId,
+      receivedBytes: t.receivedBytes,
+      fatal: false,
+    });
+    return;
+  }
+  if (msg.size != null && Number(msg.size) !== t.expectedSize) {
+    send({
+      type: "error",
+      code: "size_mismatch",
+      transferId: t.transferId,
+      fileId: t.fileId,
+      fatal: true,
+    });
+    failTransfer(t, "size mismatch");
+    return;
+  }
+  if (!t.completeAck) {
+    t.completeAck = {
+      transferId: t.transferId,
+      fileId: t.fileId,
+      receivedBytes: t.receivedBytes,
+      metaVersion: t.metaVersion,
+      epoch: t.epoch,
+    };
+  }
+  // Rebuild with the current connection identity; a duplicate complete can
+  // arrive on a newer connection after a reconnect.
+  send({ type: "complete-ack", ...t.completeAck });
+}
+
+async function computeHash(t) {
+  if (t.hash) return t.hash;
+  if (t.expectedSize > 256 * 1024 * 1024) {
+    // A 1 GiB ArrayBuffer + digest is too heavy for the page; large-file
+    // integrity is checked via segment hashes instead.
+    log("文件较大，跳过整文件哈希");
+    return null;
+  }
+  try {
+    const file = await t.binHandle.getFile();
+    const buf = await file.arrayBuffer();
+    t.hash = await sha256Hex(buf);
+    updateIncoming(t);
+    return t.hash;
+  } catch (err) {
+    log(`计算哈希失败: ${err.message}`);
+    return null;
+  }
+}
+
+// ---------- UI ----------
+
+function renderOutgoing() {
+  const root = $("outgoing");
+  const items = [...state.transfers.values()].filter((t) => t.direction === "send");
+  refreshClearOutgoingButton();
+  if (items.length === 0) {
+    root.innerHTML = '<div class="empty">还没有发送任务。</div>';
+    return;
+  }
+  root.innerHTML = "";
+  for (const t of items) {
+    const el = document.createElement("div");
+    el.className = "item";
+    el.dataset.transferId = String(t.transferId);
+    el.innerHTML = `
+      <div class="top"><span class="name"></span><span class="muted mono"></span></div>
+      <div class="bar"><i></i></div>
+      <div class="meta"><span class="state"></span><span class="detail mono"></span><button class="ghost btn-pause hidden">暂停</button></div>
+    `;
+    el.querySelector(".name").textContent = t.path || t.name;
+    el.querySelector(".top .mono").textContent = fmtBytes(t.size);
+    el.querySelector(".btn-pause").addEventListener("click", () => {
+      if (t.paused) resumeTransfer(t);
+      else pauseTransfer(t);
+    });
+    root.appendChild(el);
+    updateOutgoing(t);
+  }
+}
+
+const STATE_LABELS = {
+  offering: "协商中",
+  sending: "发送中",
+  completing: "校验中",
+  completed: "已完成",
+  offered: "待确认",
+  receiving: "接收中",
+  received: "已完成",
+  partial: "未完成",
+  failed: "失败",
+};
+
+function stateLabel(t) {
+  return STATE_LABELS[t.state] || t.state;
+}
+
+function sampleRate(t, bytes) {
+  const now = Date.now();
+  if (!t.rateSample) {
+    t.rateSample = { at: now, bytes };
+    return 0;
+  }
+  const dt = now - t.rateSample.at;
+  if (dt >= 500) {
+    t.speed = Math.max(0, (bytes - t.rateSample.bytes) / (dt / 1000));
+    t.rateSample = { at: now, bytes };
+  }
+  return t.speed || 0;
+}
+
+function outgoingDetail(t) {
+  if (t.state === "completed") return "通道已释放";
+  if (t.state === "failed") return `失败${t.error ? " · " + t.error : ""}`;
+  if (t.paused) return "已暂停";
+  if (t.state === "completing") return "校验中";
+  if (t.state === "offering") return "等待接收端接受";
+  return `${fmtProgress(t.ackedOffset, t.size)} · ${fmtSpeed(t.sentOffset, Date.now() - t.startedAt)}`;
+}
+
+function updateOutgoing(t) {
+  const el = document.querySelector(`#outgoing .item[data-transfer-id="${t.transferId}"]`);
+  if (!el) return;
+  // Main progress is the persisted/acked offset, not what was handed to the
+  // socket: the bar must never run ahead of what the peer actually has.
+  const pct = t.size ? Math.min(100, (t.ackedOffset / t.size) * 100) : 0;
+  sampleRate(t, t.ackedOffset);
+  const bar = el.querySelector(".bar");
+  let barClass = "bar";
+  if (t.state === "failed") barClass += " bad";
+  else if (t.paused) barClass += " warn";
+  else if (t.state === "sending" && !state.reconnectVisible) barClass += " flow";
+  bar.className = barClass;
+  bar.querySelector("i").style.width = `${pct}%`;
+  el.querySelector(".state").textContent = stateLabel(t);
+  el.querySelector(".detail").textContent = outgoingDetail(t);
+  const pauseBtn = el.querySelector(".btn-pause");
+  if (pauseBtn) {
+    pauseBtn.classList.toggle("hidden", t.state !== "sending");
+    pauseBtn.textContent = t.paused ? "继续" : "暂停";
+  }
+}
+
+function renderIncoming() {
+  const root = $("incoming");
+  const items = [...state.transfers.values()].filter((t) => t.direction === "recv");
+  const count = $("recvCount");
+  if (count) count.textContent = items.length ? `${items.length} 个文件` : "";
+  refreshReceivedButton();
+  refreshIncompleteButton();
+  if (items.length === 0) {
+    root.innerHTML = '<div class="empty">等待对端发送文件。</div>';
+    return;
+  }
+  root.innerHTML = "";
+  for (const t of items) {
+    const el = document.createElement("div");
+    el.className = "item recv-item";
+    el.dataset.transferId = String(t.transferId);
+    el.innerHTML = `
+      <div class="file-row"><span class="name"></span><span class="size mono"></span></div>
+      <div class="bar"><i></i></div>
+      <div class="meta"><span class="state"></span><span class="detail mono"></span></div>
+      <div class="row" style="margin-top:8px">
+        <button class="ghost accept hidden">接收</button>
+        <button class="ghost reject hidden">拒绝</button>
+        <button class="ghost accept-batch hidden">本批全部接收</button>
+        <button class="ghost save hidden">保存到设备</button>
+        <button class="ghost remove hidden">删除</button>
+        <span class="hash"></span>
+      </div>
+    `;
+    el.querySelector(".name").textContent = t.path || t.name;
+    el.querySelector(".size").textContent = fmtBytes(t.expectedSize);
+    el.querySelector(".accept").addEventListener("click", () => acceptOffer(t));
+    el.querySelector(".reject").addEventListener("click", () => rejectOffer(t));
+    el.querySelector(".accept-batch").addEventListener("click", () => acceptBatch(t));
+    el.querySelector(".save").addEventListener("click", () => downloadReceived(t));
+    el.querySelector(".remove").addEventListener("click", () => removeIncoming(t));
+    root.appendChild(el);
+    updateIncoming(t);
+  }
+}
+
+function scrollIncomingIntoView(transferId) {
+  requestAnimationFrame(() => {
+    const el = document.querySelector(`#incoming .item[data-transfer-id="${transferId}"]`);
+    if (el) el.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function incomingDetail(t) {
+  if (t.state === "offered") return `等待你确认接收 · ${fmtBytes(t.expectedSize)}`;
+  if (t.state === "partial") return `未完成 · ${fmtProgress(t.receivedBytes, t.expectedSize)}`;
+  if (t.state === "received") return "已写入本机，可保存";
+  if (t.state === "failed") return `失败${t.error ? " · " + t.error : ""}`;
+  if (t.peerPaused) return "发送端已暂停";
+  const writing = t.writtenBytes > t.receivedBytes + t.chunkSize;
+  const base = `${fmtProgress(t.receivedBytes, t.expectedSize)} · ${fmtSpeed(t.receivedBytes, Date.now() - t.startedAt)}`;
+  return writing ? `${base} · 写入本机中` : base;
+}
+
+function updateIncoming(t) {
+  const el = document.querySelector(`#incoming .item[data-transfer-id="${t.transferId}"]`);
+  if (!el) return;
+  const pct = t.expectedSize ? Math.min(100, (t.receivedBytes / t.expectedSize) * 100) : 0;
+  sampleRate(t, t.receivedBytes);
+  const bar = el.querySelector(".bar");
+  let barClass = "bar";
+  if (t.state === "failed") barClass += " bad";
+  else if (t.peerPaused) barClass += " warn";
+  else if (t.state === "receiving" && !state.reconnectVisible) barClass += " flow";
+  bar.className = barClass;
+  bar.querySelector("i").style.width = `${pct}%`;
+  el.querySelector(".state").textContent = stateLabel(t);
+  el.querySelector(".detail").textContent = incomingDetail(t);
+  const canDecide = t.state === "offered";
+  el.querySelector(".accept").classList.toggle("hidden", !canDecide);
+  el.querySelector(".reject").classList.toggle("hidden", !canDecide);
+  el.querySelector(".accept-batch").classList.toggle(
+    "hidden",
+    !(canDecide && t.batchTotal > 1),
+  );
+  const save = el.querySelector(".save");
+  save.classList.toggle("hidden", t.state !== "received");
+  const remove = el.querySelector(".remove");
+  remove.classList.toggle(
+    "hidden",
+    !(t.state === "partial" || t.state === "failed"),
+  );
+  const hashEl = el.querySelector(".hash");
+  if (t.hash) hashEl.textContent = `SHA-256 ${t.hash}`;
+  refreshReceivedButton();
+}
+
+function receivedTransfers() {
+  return [...state.transfers.values()].filter(
+    (t) => t.direction === "recv" && t.state === "received",
+  );
+}
+
+function refreshReceivedButton() {
+  const btn = $("clearReceivedBtn");
+  if (!btn) return;
+  btn.disabled = state.clearingReceived || receivedTransfers().length === 0;
+}
+
+function incompleteTransfers() {
+  return [...state.transfers.values()].filter(
+    (t) => t.direction === "recv" && (t.state === "partial" || t.state === "failed"),
+  );
+}
+
+function refreshIncompleteButton() {
+  const btn = $("clearIncompleteBtn");
+  if (!btn) return;
+  btn.disabled = incompleteTransfers().length === 0;
+}
+
+async function deleteTransferFiles(dir, t) {
+  if (t.io) {
+    try {
+      await t.io.close();
+    } catch {}
+    t.io = null;
+  }
+  let ok = true;
+  for (const name of [`${t.fileId}.bin`, `${t.fileId}.meta.a`, `${t.fileId}.meta.b`]) {
+    try {
+      await dir.removeEntry(name);
+    } catch (err) {
+      if (err && err.name === "NotFoundError") continue;
+      ok = false;
+      log(`删除失败 ${name}: ${err.message || err}`);
+    }
+  }
+  return ok;
+}
+
+async function removeIncoming(t) {
+  if (!t || t.direction !== "recv") return;
+  if (t.state !== "partial" && t.state !== "failed") return;
+  let dir;
+  try {
+    dir = await roomDirectory(state.roomId);
+  } catch (err) {
+    log(`清理失败：${err.message || err}`);
+    return;
+  }
+  if (await deleteTransferFiles(dir, t)) {
+    state.transfers.delete(t.transferId);
+    renderIncoming();
+    log(`已删除未完成：${t.path || t.name}`);
+  }
+}
+
+async function clearIncompleteFiles() {
+  const items = incompleteTransfers();
+  let dir;
+  try {
+    dir = await roomDirectory(state.roomId);
+  } catch (err) {
+    log(`清理失败：${err.message || err}`);
+    return;
+  }
+  let removed = 0;
+  let failed = 0;
+  for (const t of items) {
+    if (await deleteTransferFiles(dir, t)) {
+      state.transfers.delete(t.transferId);
+      removed += 1;
+    } else {
+      failed += 1;
+    }
+  }
+  // Orphans (e.g. a .bin whose meta was lost) have no row to drive deletion.
+  const keep = new Set(
+    [...state.transfers.values()]
+      .filter((t) => t.direction === "recv" &&
+        (t.state === "received" || t.state === "receiving" || t.state === "offered"))
+      .map((t) => t.fileId),
+  );
+  const fileRe = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(bin|meta\.[ab])$/i;
+  try {
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind !== "file") continue;
+      const m = fileRe.exec(name);
+      if (!m || keep.has(m[1].toLowerCase())) continue;
+      try {
+        await dir.removeEntry(name);
+        removed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+  } catch {
+    // Best-effort orphan sweep.
+  }
+  renderIncoming();
+  log(`清理未完成 ${removed} 项${failed ? `，${failed} 项失败` : ""}`);
+}
+
+function finishedOutgoingTransfers() {
+  return [...state.transfers.values()].filter(
+    (t) => t.direction === "send" && (t.state === "completed" || t.state === "failed"),
+  );
+}
+
+function refreshClearOutgoingButton() {
+  const btn = $("clearOutgoingBtn");
+  if (!btn) return;
+  btn.disabled = finishedOutgoingTransfers().length === 0;
+}
+
+function clearOutgoingFiles() {
+  const done = finishedOutgoingTransfers();
+  if (!done.length) return;
+  for (const t of done) state.transfers.delete(t.transferId);
+  if (state.batch && state.batch.done >= state.batch.items.length) {
+    const activeSend = [...state.transfers.values()].some(
+      (t) => t.direction === "send" && ["offering", "sending", "completing"].includes(t.state),
+    );
+    if (!activeSend) state.batch = null;
+  }
+  renderOutgoing();
+  updateBatchHint();
+  renderStatus();
+  log(`已清理发送记录 ${done.length} 条`);
+}
+
+// Removes the OPFS copies (data + both meta slots) and drops the rows. A file
+// whose entries cannot be deleted stays in the list, so the UI never claims a
+// cleanup that did not happen.
+async function clearReceivedFiles() {
+  const items = receivedTransfers();
+  if (!items.length) return;
+  let dir;
+  try {
+    dir = await roomDirectory(state.roomId);
+  } catch (err) {
+    log(`清理失败：${err.message || err}`);
+    return;
+  }
+  let removed = 0;
+  let failed = 0;
+  for (const t of items) {
+    if (await deleteTransferFiles(dir, t)) {
+      state.transfers.delete(t.transferId);
+      removed += 1;
+    } else {
+      failed += 1;
+    }
+  }
+  renderIncoming();
+  log(`清理已接收文件 ${removed} 个${failed ? `，${failed} 个删除失败` : ""}`);
+}
+
+async function downloadReceived(t) {
+  try {
+    const file = await t.binHandle.getFile();
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = ((t.path || t.name).split("/").pop() || "file.bin");
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (err) {
+    log(`保存失败: ${err.message}`);
+  }
+}
+
+// ---------- Bootstrap ----------
+
+function normalizeRoomInput(value) {
+  const raw = value.trim();
+  if (!raw) return null;
+  const m = raw.match(/\/r\/([^/?#]+)/);
+  if (m) return decodeURIComponent(m[1]);
+  return raw;
+}
+
+async function beginWithRoom(room, password) {
+  state.passwordHash = password
+    ? await sha256Hex(new TextEncoder().encode(password))
+    : null;
+  history.pushState({}, "", `/r/${encodeURIComponent(room)}`);
+  startWithRoom(room);
+}
+
+$("createBtn").addEventListener("click", async () => {
+  await beginWithRoom(randomRoomId(), $("passwordInput").value);
+});
+
+$("joinBtn").addEventListener("click", async () => {
+  const room = normalizeRoomInput($("roomInput").value);
+  if (!room) return;
+  await beginWithRoom(room, $("passwordInput").value);
+});
+
+$("pwBtn").addEventListener("click", async () => {
+  const room = state.roomId || roomFromPath();
+  if (!room) return;
+  state.stopped = false;
+  state.stoppedCode = null;
+  state.passwordHash = await sha256Hex(new TextEncoder().encode($("pwInput").value));
+  $("pwView").classList.add("hidden");
+  $("appView").classList.remove("hidden");
+  connect();
+});
+
+$("shareBtn").addEventListener("click", () => toggleShare());
+$("copyBtn").addEventListener("click", copyShareLink);
+$("themeBtn").addEventListener("click", () => {
+  const root = document.documentElement;
+  const next = root.dataset.theme === "light" ? "dark" : "light";
+  root.dataset.theme = next;
+  try {
+    localStorage.setItem("relay.theme", next);
+  } catch {
+    // Storage can be unavailable; the toggle still works for this page.
+  }
+});
+$("pickFilesBtn").addEventListener("click", () => $("fileInput").click());
+
+const dropZone = $("dropZone");
+["dragenter", "dragover"].forEach((ev) =>
+  dropZone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    dropZone.classList.add("drag");
+  }),
+);
+["dragleave", "dragend"].forEach((ev) =>
+  dropZone.addEventListener(ev, () => dropZone.classList.remove("drag")),
+);
+dropZone.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  dropZone.classList.remove("drag");
+  const items = await filesFromDataTransfer(e.dataTransfer);
+  addPendingItems(items);
+});
+
+$("fileInput").addEventListener("change", () => {
+  addPendingFiles($("fileInput").files);
+  $("fileInput").value = "";
+});
+
+$("sendBtn").addEventListener("click", () => {
+  if (!state.pending.length) return;
+  const items = state.pending;
+  state.pending = [];
+  renderPending();
+  enqueueItems(items);
+});
+$("clearPendingBtn").addEventListener("click", clearPending);
+
+$("autoAcceptToggle").checked = state.autoAccept;
+$("autoAcceptToggle").addEventListener("change", () => {
+  applyAutoAccept($("autoAcceptToggle").checked);
+});
+
+let clearReceivedTimer = null;
+function resetClearReceivedConfirm() {
+  clearTimeout(clearReceivedTimer);
+  const btn = $("clearReceivedBtn");
+  delete btn.dataset.confirm;
+  btn.textContent = "清空已接收";
+}
+$("clearReceivedBtn").addEventListener("click", async () => {
+  const btn = $("clearReceivedBtn");
+  if (state.clearingReceived) return;
+  // Two-step confirm keeps a destructive tap from firing on a phone.
+  if (!btn.dataset.confirm) {
+    btn.dataset.confirm = "1";
+    btn.textContent = "确认清空？";
+    clearTimeout(clearReceivedTimer);
+    clearReceivedTimer = setTimeout(resetClearReceivedConfirm, 3000);
+    return;
+  }
+  resetClearReceivedConfirm();
+  state.clearingReceived = true;
+  refreshReceivedButton();
+  try {
+    await clearReceivedFiles();
+  } finally {
+    state.clearingReceived = false;
+    refreshReceivedButton();
+  }
+});
+
+let clearIncompleteTimer = null;
+function resetClearIncompleteConfirm() {
+  clearTimeout(clearIncompleteTimer);
+  const btn = $("clearIncompleteBtn");
+  delete btn.dataset.confirm;
+  btn.textContent = "清理未完成";
+}
+$("clearIncompleteBtn").addEventListener("click", async () => {
+  const btn = $("clearIncompleteBtn");
+  if (!btn.dataset.confirm) {
+    btn.dataset.confirm = "1";
+    btn.textContent = "确认清理？";
+    clearTimeout(clearIncompleteTimer);
+    clearIncompleteTimer = setTimeout(resetClearIncompleteConfirm, 3000);
+    return;
+  }
+  resetClearIncompleteConfirm();
+  btn.disabled = true;
+  try {
+    await clearIncompleteFiles();
+  } finally {
+    refreshIncompleteButton();
+  }
+});
+
+let clearOutgoingTimer = null;
+function resetClearOutgoingConfirm() {
+  clearTimeout(clearOutgoingTimer);
+  const btn = $("clearOutgoingBtn");
+  delete btn.dataset.confirm;
+  btn.textContent = "清空已完成";
+}
+$("clearOutgoingBtn").addEventListener("click", () => {
+  const btn = $("clearOutgoingBtn");
+  if (!btn.dataset.confirm) {
+    btn.dataset.confirm = "1";
+    btn.textContent = "确认清空？";
+    clearTimeout(clearOutgoingTimer);
+    clearOutgoingTimer = setTimeout(resetClearOutgoingConfirm, 3000);
+    return;
+  }
+  resetClearOutgoingConfirm();
+  clearOutgoingFiles();
+});
+
+$("folderBtn").addEventListener("click", () => $("folderInput").click());
+$("folderInput").addEventListener("change", () => {
+  addPendingFiles($("folderInput").files);
+  $("folderInput").value = "";
+});
+
+// Keep the send button and the global status line fresh.
+setInterval(() => {
+  refreshSendButton();
+  renderStatus();
+}, 500);
+
+const initialRoom = roomFromPath();
+if (initialRoom) {
+  startWithRoom(initialRoom);
+} else {
+  $("joinView").classList.remove("hidden");
+}
+
+window.__relay = {
+  state,
+  setAutoAccept(value) {
+    applyAutoAccept(Boolean(value));
+  },
+  dropNextBinary(n = 1) {
+    state.dropNextBinary = Number(n) || 1;
+  },
+  dropNextControl(type = "complete", count = 1) {
+    state.dropNextControl = String(type);
+    state.dropNextControlCount = Number(count) || 1;
+  },
+  pause(transferId) {
+    pauseTransfer([...state.transfers.values()].find((t) => t.transferId === Number(transferId)));
+  },
+  resume(transferId) {
+    resumeTransfer([...state.transfers.values()].find((t) => t.transferId === Number(transferId)));
+  },
+  setWriteDelay(ms) {
+    state.writeDelayMs = Math.max(0, Number(ms) || 0);
+  },
+  setReconnectPaused(paused) {
+    state.reconnectPaused = Boolean(paused);
+    if (!state.reconnectPaused && !state.stopped && state.roomId &&
+        (!state.ws || state.ws.readyState !== WebSocket.OPEN)) {
+      connect();
+    }
+  },
+  getQrMatrix() {
+    return state.qrMatrix;
+  },
+  getShareLink() {
+    return state.roomId ? shareLinkFor(state.roomId) : null;
+  },
+  getTransfers() {
+    return [...state.transfers.values()].map((t) => ({
+      transferId: t.transferId,
+      fileId: t.fileId,
+      direction: t.direction,
+      name: t.name,
+      path: t.path || null,
+      batchId: t.batchId || null,
+      size: t.size ?? t.expectedSize,
+      expectedSize: t.expectedSize ?? null,
+      state: t.state,
+      sentOffset: t.sentOffset,
+      ackedOffset: t.ackedOffset,
+      windowSize: t.windowSize,
+      paused: Boolean(t.paused),
+      receivedBytes: t.receivedBytes,
+      writtenBytes: t.writtenBytes,
+      metaVersion: t.metaVersion,
+      epoch: t.epoch,
+      writeMs: Math.round(t.writeMs || 0),
+      flushMs: Math.round(t.flushMs || 0),
+      metaMs: Math.round(t.metaMs || 0),
+      error: t.error || null,
+      hash: t.hash || null,
+    }));
+  },
+  async getReceivedHash(fileId) {
+    const t = [...state.transfers.values()].find((x) => x.fileId === fileId && x.direction === "recv");
+    if (!t) throw new Error("transfer not found");
+    return computeHash(t);
+  },
+  async getReceivedSegmentHashes(fileId, segBytes = 64 * 1024 * 1024) {
+    const t = [...state.transfers.values()].find((x) => x.fileId === fileId && x.direction === "recv");
+    if (!t) throw new Error("transfer not found");
+    const file = await t.binHandle.getFile();
+    const out = [];
+    for (let off = 0; off < file.size; off += segBytes) {
+      const buf = await file.slice(off, Math.min(off + segBytes, file.size)).arrayBuffer();
+      out.push(await sha256Hex(buf));
+    }
+    return out;
+  },
+  async getReceivedSize(fileId) {
+    const t = [...state.transfers.values()].find((x) => x.fileId === fileId && x.direction === "recv");
+    if (!t) throw new Error("transfer not found");
+    const file = await t.binHandle.getFile();
+    return file.size;
+  },
+  logs() {
+    return state.logs.slice();
+  },
+};
+</script>
+</body>
+</html>
