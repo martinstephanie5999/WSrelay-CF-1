@@ -90,7 +90,7 @@ npm run dev
 | Root directory | 留空（即仓库根目录 `/`） |
 | Build command | `npm run build:single`（可选；只验证单文件产物，留空也能部署） |
 | Deploy command | `npx wrangler deploy` |
-| Preview command | 留空，并关闭 Preview builds |
+| Preview command | 留空或默认，并关闭 Preview builds |
 | Build variables | 不需要；如需固定 Node，可加 `NODE_VERSION=20` |
 | Build secrets | 不需要 |
 
